@@ -95,8 +95,5 @@
     "tsx": "4.19.2",
     "dotenv-cli": "7.4.4"
   },
-  "engines": {
-    "node": "20.x"
-  },
   "packageManager": "pnpm@9.15.4"
 }
