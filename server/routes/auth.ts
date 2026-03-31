@@ -161,15 +161,23 @@ auth.post(
     // Initialize zero balances
     await initializeUserBalances(user.uid);
 
-    // Send email verification OTP
-    await sendEmailOtp(email);
+    // Send email verification OTP — non-fatal: account is created even if email fails
+    let emailSent = true;
+    try {
+      await sendEmailOtp(email);
+    } catch (emailErr) {
+      emailSent = false;
+      console.error("[register] Email OTP send failed:", emailErr);
+    }
 
     return c.json(
       {
         success: true,
         data: {
           uid: user.uid,
-          message: "Account created. Check your email for a verification code.",
+          message: emailSent
+            ? "Account created. Check your email for a verification code."
+            : "Account created. Email delivery failed — use Resend OTP to verify.",
           requiresEmailVerification: true,
         },
       },
