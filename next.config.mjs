@@ -1,9 +1,4 @@
 import { withSentryConfig } from "@sentry/nextjs";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -16,10 +11,6 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
 
-  turbopack: {
-    root: __dirname,
-  },
-
   // Allow HMR from local network (phone/tablet testing)
   allowedDevOrigins: [
     "192.168.10.107",
@@ -30,8 +21,11 @@ const nextConfig = {
 
   images: {
     remotePatterns: [
-      { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
-      { protocol: "https", hostname: "s3.tradingview.com", pathname: "/**" },
+      { protocol: "https", hostname: "*.supabase.co",              pathname: "/storage/v1/object/public/**" },
+      { protocol: "https", hostname: "s3.tradingview.com",         pathname: "/**" },
+      { protocol: "https", hostname: "s2.coinmarketcap.com",       pathname: "/static/img/coins/**" },
+      { protocol: "https", hostname: "assets.coingecko.com",       pathname: "/coins/images/**" },
+      { protocol: "https", hostname: "coin-images.coingecko.com",  pathname: "/**" },
     ],
   },
 
@@ -53,7 +47,7 @@ const nextConfig = {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://s3.tradingview.com https://*.sentry.io",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
-              "img-src 'self' data: blob: https://*.supabase.co https://dd.dexscreener.com https://s3.tradingview.com",
+              "img-src 'self' data: blob: https://*.supabase.co https://dd.dexscreener.com https://s3.tradingview.com https://s2.coinmarketcap.com https://assets.coingecko.com https://coin-images.coingecko.com",
               [
                 "connect-src 'self'",
                 "http://localhost:*",
@@ -111,10 +105,11 @@ const nextConfig = {
 export default withSentryConfig(nextConfig, {
   org:     process.env.SENTRY_ORG     ?? "odapap",
   project: process.env.SENTRY_PROJECT ?? "kryptoke",
-  silent:  !process.env.CI,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent:  true,  // always silent — avoids build failure when token missing
   widenClientFileUpload: true,
   tunnelRoute:    "/monitoring-tunnel",
   hideSourceMaps: true,
   disableLogger:  true,
-  automaticVercelMonitors: true,
+  disableSourceMapUpload: !process.env.SENTRY_AUTH_TOKEN,
 });
