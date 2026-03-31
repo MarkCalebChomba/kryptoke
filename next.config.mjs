@@ -1,9 +1,8 @@
-import { withSentryConfig } from "@sentry/nextjs";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
 
-  // Skip type and lint checks during builds - these run in CI separately
+  // Skip TS type-checking and ESLint during CI builds
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -11,21 +10,13 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
 
-  // Allow HMR from local network (phone/tablet testing)
-  allowedDevOrigins: [
-    "192.168.10.107",
-    "192.168.1.*",
-    "192.168.0.*",
-    "10.0.0.*",
-  ],
-
   images: {
     remotePatterns: [
-      { protocol: "https", hostname: "*.supabase.co",              pathname: "/storage/v1/object/public/**" },
-      { protocol: "https", hostname: "s3.tradingview.com",         pathname: "/**" },
-      { protocol: "https", hostname: "s2.coinmarketcap.com",       pathname: "/static/img/coins/**" },
-      { protocol: "https", hostname: "assets.coingecko.com",       pathname: "/coins/images/**" },
-      { protocol: "https", hostname: "coin-images.coingecko.com",  pathname: "/**" },
+      { protocol: "https", hostname: "*.supabase.co",             pathname: "/storage/v1/object/public/**" },
+      { protocol: "https", hostname: "s2.coinmarketcap.com",      pathname: "/static/img/coins/**" },
+      { protocol: "https", hostname: "assets.coingecko.com",      pathname: "/coins/images/**" },
+      { protocol: "https", hostname: "coin-images.coingecko.com", pathname: "/**" },
+      { protocol: "https", hostname: "s3.tradingview.com",        pathname: "/**" },
     ],
   },
 
@@ -51,8 +42,6 @@ const nextConfig = {
               [
                 "connect-src 'self'",
                 "http://localhost:*",
-                "http://192.168.10.107:*",
-                "https://kryptoke.com",
                 "wss://stream.binance.com:9443",
                 "wss://ws.okx.com:8443",
                 "https://*.supabase.co",
@@ -62,7 +51,6 @@ const nextConfig = {
                 "wss://pushstream.tradingview.com",
                 "wss://*.tradingview.com",
                 "https://eth.llamarpc.com",
-                "https://bsc-dataseed.binance.org",
                 "https://bsc-dataseed1.binance.org",
                 "https://polygon-rpc.com",
                 "https://arb1.arbitrum.io",
@@ -91,7 +79,7 @@ const nextConfig = {
         headers: [
           {
             key: "Access-Control-Allow-Origin",
-            value: process.env.NODE_ENV === "production" ? "https://kryptoke.com" : "*",
+            value: process.env.NODE_ENV === "production" ? "https://kryptoke.vercel.app" : "*",
           },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
           { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, X-Sweep-Secret, X-Cron-Secret" },
@@ -102,14 +90,4 @@ const nextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
-  org:     process.env.SENTRY_ORG     ?? "odapap",
-  project: process.env.SENTRY_PROJECT ?? "kryptoke",
-  authToken: process.env.SENTRY_AUTH_TOKEN,
-  silent:  true,  // always silent — avoids build failure when token missing
-  widenClientFileUpload: true,
-  tunnelRoute:    "/monitoring-tunnel",
-  hideSourceMaps: true,
-  disableLogger:  true,
-  disableSourceMapUpload: !process.env.SENTRY_AUTH_TOKEN,
-});
+export default nextConfig;
