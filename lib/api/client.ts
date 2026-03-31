@@ -10,7 +10,7 @@ const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ??
   (process.env.NODE_ENV === "development"
     ? "http://localhost:3000/api/v1"
-    : "https://kryptoke.com/api/v1");
+    : "https://kryptoke-mu.vercel.app/api/v1");
 
 /* ─── Axios Instance ────────────────────────────────────────────────────── */
 
