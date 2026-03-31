@@ -169,10 +169,10 @@ function BorrowSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void
           <div className="bg-bg-surface2 rounded-xl border border-border px-4 py-3 space-y-2">
             <p className="font-syne font-semibold text-xs text-text-primary mb-1">Loan Summary</p>
             {[
-              { label: "LTV Ratio", value: ltv ? `${ltv}%`, valueClass: ltvColor },
-              { label: "Liquidation Price", value: liquidationPrice ? `$${liquidationPrice}`, valueClass: "text-down" },
+              { label: "LTV Ratio", value: ltv ? `${ltv}%` : null, valueClass: ltvColor },
+              { label: "Liquidation Price", value: liquidationPrice ? `$${liquidationPrice}` : null, valueClass: "text-down" },
               { label: "Annual Rate (APR)", value: `${annualRate}%`, valueClass: "text-text-primary" },
-              { label: "Est. Interest", value: totalInterest ? `${totalInterest} USDT`, valueClass: "text-text-primary" },
+              { label: "Est. Interest", value: totalInterest ? `${totalInterest} USDT` : null, valueClass: "text-text-primary" },
               { label: "Max LTV", value: `${(selectedProduct.maxLtv * 100).toFixed(0)}%`, valueClass: "text-text-muted" },
             ].map(({ label, value, valueClass }) => (
               <div key={label} className="flex justify-between">

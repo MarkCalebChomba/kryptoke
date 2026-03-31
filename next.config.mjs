@@ -2,12 +2,9 @@
 const nextConfig = {
   reactStrictMode: true,
 
-  // Skip TS type-checking and ESLint during CI builds
+  // Skip TS type-checking during CI builds (eslint config moved to .eslintrc.json)
   typescript: {
     ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
   },
 
   images: {
