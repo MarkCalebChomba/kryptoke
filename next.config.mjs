@@ -2,18 +2,17 @@
 const nextConfig = {
   reactStrictMode: true,
 
-  // Skip TS type-checking during CI builds (eslint config moved to .eslintrc.json)
   typescript: {
     ignoreBuildErrors: true,
   },
 
   images: {
     remotePatterns: [
-      { protocol: "https", hostname: "*.supabase.co",             pathname: "/storage/v1/object/public/**" },
-      { protocol: "https", hostname: "s2.coinmarketcap.com",      pathname: "/static/img/coins/**" },
-      { protocol: "https", hostname: "assets.coingecko.com",      pathname: "/coins/images/**" },
+      { protocol: "https", hostname: "*.supabase.co",          pathname: "/storage/v1/object/public/**" },
+      { protocol: "https", hostname: "s2.coinmarketcap.com",   pathname: "/static/img/coins/**" },
+      { protocol: "https", hostname: "assets.coingecko.com",   pathname: "/coins/images/**" },
       { protocol: "https", hostname: "coin-images.coingecko.com", pathname: "/**" },
-      { protocol: "https", hostname: "s3.tradingview.com",        pathname: "/**" },
+      { protocol: "https", hostname: "s3.tradingview.com",     pathname: "/**" },
     ],
   },
 
@@ -39,24 +38,37 @@ const nextConfig = {
               [
                 "connect-src 'self'",
                 "http://localhost:*",
+                "https://*.vercel.app",
+                "https://kryptoke.odapap.com",
                 "wss://stream.binance.com:9443",
                 "wss://ws.okx.com:8443",
                 "https://*.supabase.co",
                 "wss://*.supabase.co",
                 "https://*.upstash.io",
                 "https://*.sentry.io",
+                "https://api.binance.com",
+                "https://api.alternative.me",
+                "https://api.frankfurter.app",
                 "wss://pushstream.tradingview.com",
                 "wss://*.tradingview.com",
                 "https://eth.llamarpc.com",
+                "https://bsc-dataseed.binance.org",
                 "https://bsc-dataseed1.binance.org",
                 "https://polygon-rpc.com",
                 "https://arb1.arbitrum.io",
                 "https://mainnet.optimism.io",
                 "https://mainnet.base.org",
+                "https://rpc.ftm.tools",
                 "https://api.avax.network",
                 "https://rpc.linea.build",
                 "https://mainnet.era.zksync.io",
                 "https://rpc.scroll.io",
+                "https://rpc.mantle.xyz",
+                "https://rpc.gnosischain.com",
+                "https://forno.celo.org",
+                "https://ltc1.trezor.io",
+                "https://api.blockcypher.com",
+                "https://bch1.trezor.io",
                 "https://api.trongrid.io",
                 "https://xrplcluster.com",
                 "https://toncenter.com",
@@ -76,7 +88,10 @@ const nextConfig = {
         headers: [
           {
             key: "Access-Control-Allow-Origin",
-            value: process.env.NODE_ENV === "production" ? "https://kryptoke.vercel.app" : "*",
+            // Wildcard in dev, locked to your actual domains in prod
+            value: process.env.NODE_ENV === "production"
+              ? (process.env.NEXT_PUBLIC_APP_URL ?? "https://kryptoke-mu.vercel.app")
+              : "*",
           },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
           { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, X-Sweep-Secret, X-Cron-Secret" },
