@@ -3,15 +3,12 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "@/lib/store";
-import { useQueryClient } from "@tanstack/react-query";
-import { apiGet } from "@/lib/api/client";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const qc = useQueryClient();
   const { isAuthenticated, isLoadingAuth } = useAppStore((s) => ({
     isAuthenticated: s.isAuthenticated,
     isLoadingAuth: s.isLoadingAuth,
@@ -22,16 +19,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace("/auth/login");
     }
   }, [isAuthenticated, isLoadingAuth, router]);
-
-  // Prefetch market overview in background so Markets tab is instant
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    qc.prefetchQuery({
-      queryKey: ["market", "overview"],
-      queryFn: () => apiGet("/market/overview"),
-      staleTime: 30_000,
-    }).catch(() => undefined);
-  }, [isAuthenticated, qc]);
 
   if (isLoadingAuth) {
     return (

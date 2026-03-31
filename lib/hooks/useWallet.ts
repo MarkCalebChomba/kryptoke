@@ -17,10 +17,9 @@ export function useWallet() {
   const query = useQuery({
     queryKey: ["wallet", "info"],
     queryFn: () => apiGet<WalletInfoResponse>("/wallet/info"),
-    staleTime: 60_000,         // 1 min — balances rarely change mid-session
-    gcTime:    10 * 60_000,
-    refetchInterval: 90_000,   // background refresh every 90s
-    refetchOnWindowFocus: false, // don't re-fetch on every phone app-switch
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true, // balances must be fresh when user returns to app
   });
 
   useEffect(() => {

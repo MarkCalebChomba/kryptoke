@@ -1,7 +1,6 @@
 import type { Context, Next } from "hono";
 import { verifyJwt } from "@/server/services/jwt";
-import { touchLastActive, isAdminUser } from "@/server/db/users";
-import { redis } from "@/lib/redis/client";
+import { touchLastActive } from "@/server/db/users";
 
 export interface AuthContext {
   uid: string;
@@ -33,6 +32,7 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
     // Fire-and-forget last active — throttled to once per 5 min per user via Redis
     (async () => {
       try {
+        const { redis } = await import("@/lib/redis/client");
         const key = `last_active_touched:${payload.uid}`;
         const already = await redis.get(key);
         if (!already) {
@@ -64,6 +64,7 @@ export async function adminMiddleware(c: Context, next: Next): Promise<Response 
   const adminRole = c.req.header("x-admin-role");
   if (!adminRole) {
     // Double-check via DB for direct Lambda calls
+    const { isAdminUser } = await import("@/server/db/users");
     const isAdmin = await isAdminUser(user.uid);
     if (!isAdmin) {
       return c.json(

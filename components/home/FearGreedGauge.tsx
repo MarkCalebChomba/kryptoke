@@ -19,20 +19,76 @@ function getLevel(value: number) {
   return LEVELS[4]!;
 }
 
+// ── 30-day sparkline curve ────────────────────────────────────────────────────
+
+interface HistoryPoint { date: string; value: number; label: string }
+
+function FearGreedCurve({ history, currentValue, color }: {
+  history: HistoryPoint[];
+  currentValue: number;
+  color: string;
+}) {
+  if (history.length < 2) return null;
+
+  const W = 280, H = 60, PAD = 4;
+  const values = history.map((h) => h.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  const toX = (i: number) => PAD + (i / (values.length - 1)) * (W - PAD * 2);
+  const toY = (v: number) => PAD + (1 - (v - min) / range) * (H - PAD * 2);
+
+  // Build SVG path
+  const points = values.map((v, i) => `${toX(i).toFixed(1)},${toY(v).toFixed(1)}`);
+  const linePath = `M ${points.join(" L ")}`;
+
+  // Area fill path
+  const areaPath = `M ${toX(0).toFixed(1)},${H} L ${points.join(" L ")} L ${toX(values.length - 1).toFixed(1)},${H} Z`;
+
+  // Current dot position
+  const lastX = toX(values.length - 1);
+  const lastY = toY(currentValue);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} className="overflow-visible">
+      <defs>
+        <linearGradient id="fgAreaGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+        </linearGradient>
+        <linearGradient id="fgLineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stopColor="#FF4560" />
+          <stop offset="25%"  stopColor="#FF8C42" />
+          <stop offset="50%"  stopColor="#F0B429" />
+          <stop offset="75%"  stopColor="#7EC850" />
+          <stop offset="100%" stopColor="#00D68F" />
+        </linearGradient>
+      </defs>
+
+      {/* Area fill */}
+      <path d={areaPath} fill="url(#fgAreaGrad)" />
+
+      {/* Line */}
+      <path d={linePath} fill="none" stroke="url(#fgLineGrad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+      {/* Current value dot */}
+      <circle cx={lastX} cy={lastY} r="4" fill={color} stroke="#080C14" strokeWidth="2"
+        style={{ filter: `drop-shadow(0 0 4px ${color}80)` }} />
+    </svg>
+  );
+}
+
+// ── Arc gauge (non-compact mode) ──────────────────────────────────────────────
+
 function gaugePoint(value: number, r: number, cx: number, cy: number) {
   const angle = Math.PI - (value / 100) * Math.PI;
-  return {
-    x: cx + r * Math.cos(angle),
-    y: cy - r * Math.sin(angle),
-  };
+  return { x: cx + r * Math.cos(angle), y: cy - r * Math.sin(angle) };
 }
 
 function ArcGauge({ value, color }: { value: number; color: string }) {
-  const W = 240, H = 130;
-  const cx = W / 2, cy = H - 10;
-  const R = 100, r = 72;
-  const strokeW = R - r;
-
+  const W = 240, H = 130, cx = W / 2, cy = H - 10;
+  const R = 100, r = 72, strokeW = R - r;
   const needle = gaugePoint(value, (R + r) / 2, cx, cy);
   const end = gaugePoint(value, R, cx, cy);
   const endInner = gaugePoint(value, r, cx, cy);
@@ -55,58 +111,71 @@ function ArcGauge({ value, color }: { value: number; color: string }) {
           <stop offset="100%" stopColor="#00D68F" />
         </linearGradient>
       </defs>
-      {/* Track */}
       <path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
         fill="none" stroke="#1C2840" strokeWidth={strokeW} strokeLinecap="butt" />
-      {/* Faint full gradient */}
       <path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
         fill="none" stroke="url(#gaugeGrad)" strokeWidth={strokeW} strokeLinecap="butt" opacity="0.2" />
-      {/* Filled arc */}
       {filledArc && <path d={filledArc} fill={color} opacity="0.9" />}
-      {/* Needle dot */}
       <circle cx={needle.x} cy={needle.y} r="6" fill={color}
         stroke="#080C14" strokeWidth="2.5"
         style={{ filter: `drop-shadow(0 0 6px ${color}80)` }} />
-      {/* Value */}
       <text x={cx} y={cy - 4} textAnchor="middle" fill={color}
         fontSize="28" fontFamily="var(--font-dm-mono), monospace" fontWeight="600">
         {value}
       </text>
-      {/* Labels */}
       <text x={cx - R + 4} y={cy + 14} fill="#4A5B7A" fontSize="9" fontFamily="var(--font-outfit), sans-serif">Fear</text>
       <text x={cx + R - 4} y={cy + 14} fill="#4A5B7A" fontSize="9" fontFamily="var(--font-outfit), sans-serif" textAnchor="end">Greed</text>
     </svg>
   );
 }
 
-export function FearGreedGauge({ compact = false }: { compact?: boolean }) {
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function FearGreedGauge({ compact = false, history }: {
+  compact?: boolean;
+  history?: HistoryPoint[];
+}) {
   const { data, isLoading } = useFearGreed();
   const [showLegend, setShowLegend] = useState(false);
+
   const value = data?.value ?? 50;
   const level = getLevel(value);
 
-  // Compact inline version for home page
+  // Compact version used on home page — shows the 30-day curve
   if (compact) {
     return (
-      <div className="card flex items-center gap-4 py-3">
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 border"
-          style={{ background: level.bg, borderColor: level.color + "40" }}>
-          <span className="font-price text-lg font-bold" style={{ color: level.color }}>{value}</span>
+      <div className="card py-3 px-3">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <p className="font-outfit text-xs text-text-muted">Fear &amp; Greed Index</p>
+            <div className="flex items-baseline gap-1.5 mt-0.5">
+              <span className="font-price text-xl font-bold" style={{ color: level.color }}>{value}</span>
+              <span className="font-syne font-bold text-xs" style={{ color: level.color }}>{level.label}</span>
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border"
+            style={{ background: level.bg, borderColor: level.color + "40" }}>
+            <span className="font-price text-base font-bold" style={{ color: level.color }}>{value}</span>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-outfit text-xs text-text-muted mb-1">Fear &amp; Greed Index</p>
-          <div className="relative h-2 rounded-full overflow-hidden mb-1" style={{
+
+        {/* 30-day curve */}
+        {history && history.length > 1 ? (
+          <FearGreedCurve history={history} currentValue={value} color={level.color} />
+        ) : (
+          /* Fallback: simple linear bar */
+          <div className="relative h-2 rounded-full overflow-hidden" style={{
             background: "linear-gradient(to right, #FF4560 0%, #FF8C42 25%, #F0B429 50%, #7EC850 75%, #00D68F 100%)"
           }}>
             <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-bg shadow transition-all duration-700"
               style={{ left: `calc(${value}% - 6px)`, backgroundColor: level.color }} />
           </div>
-          <span className="font-syne font-bold text-xs" style={{ color: level.color }}>{level.label}</span>
-        </div>
+        )}
       </div>
     );
   }
 
+  // Full version with arc gauge + 30-day curve
   return (
     <div className="mx-4">
       <div className="flex items-center justify-between mb-2">
@@ -131,6 +200,14 @@ export function FearGreedGauge({ compact = false }: { compact?: boolean }) {
           <ArcGauge value={value} color={level.color} />
           <span className="font-syne font-bold text-base mt-1" style={{ color: level.color }}>{level.label}</span>
           <p className="font-outfit text-xs text-text-muted mt-0.5">Bitcoin fear &amp; greed index</p>
+
+          {/* 30-day history curve below gauge */}
+          {history && history.length > 1 && (
+            <div className="w-full mt-3 px-2">
+              <p className="font-outfit text-[10px] text-text-muted mb-1">30-day history</p>
+              <FearGreedCurve history={history} currentValue={value} color={level.color} />
+            </div>
+          )}
         </div>
       )}
 

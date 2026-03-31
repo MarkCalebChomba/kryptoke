@@ -5,7 +5,6 @@ import { authMiddleware, adminMiddleware } from "@/server/middleware/auth";
 import { withApiRateLimit } from "@/server/middleware/ratelimit";
 import { getDb } from "@/server/db/client";
 import { getTokenPrice } from "@/server/services/blockchain";
-import { redis } from "@/lib/redis/client";
 
 const tokens = new Hono();
 tokens.use("*", withApiRateLimit());
@@ -26,16 +25,8 @@ tokens.get("/", async (c) => {
 
 tokens.get("/:address", async (c) => {
   const { address } = c.req.param();
-  const key = `token:detail:${address.toLowerCase()}`;
-
-  // Serve metadata from cache — token info never changes, price updates separately
-  const cachedMeta = await redis.get<Record<string, unknown>>(key).catch(() => null);
-  if (cachedMeta) {
-    // Price from WS store on client — just return cached metadata with stale price
-    return c.json({ success: true, data: cachedMeta });
-  }
-
   const db = getDb();
+
   const { data: token } = await db
     .from("tokens")
     .select("*")
@@ -46,15 +37,9 @@ tokens.get("/:address", async (c) => {
     return c.json({ success: false, error: "Token not found", statusCode: 404 }, 404);
   }
 
-  // Price: check Binance WS cache first, fall back to BSC RPC only if needed
-  const binancePrice = await redis.get<string>(`binance:ticker:${(token.symbol + "USDT").toUpperCase()}`).catch(() => null);
-  const price = binancePrice ?? await getTokenPrice(token.address).catch(() => "0");
+  const price = await getTokenPrice(token.address);
 
-  const result = { ...token, price };
-  // Cache metadata for 5 minutes — price is live via WS anyway
-  await redis.set(key, result, { ex: 5 * 60 }).catch(() => undefined);
-
-  return c.json({ success: true, data: result });
+  return c.json({ success: true, data: { ...token, price } });
 });
 
 /* ─── GET /price/:address ───────────────────────────────────────────────── */

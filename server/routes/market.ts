@@ -13,46 +13,30 @@ market.use("*", withApiRateLimit());
 /* ─── GET /overview ─────────────────────────────────────────────────────── */
 
 market.get("/overview", async (c) => {
-  // Serve from Redis cache first — overview is static for 30s, rebuilds in background
-  const CACHE_KEY = "market:overview:v3";
-  const cached = await redis.get<string>(CACHE_KEY).catch(() => null);
-  if (cached) {
-    return c.json({ success: true, data: JSON.parse(cached) });
-  }
-
   const db = getDb();
-  const [{ data: tokens }, rate, wsprices] = await Promise.all([
-    db.from("tokens").select("address,symbol,name,icon_url,is_new,is_seed,rank")
-      .eq("is_native", false).order("rank", { ascending: true }).limit(200),
+  // Run all three in parallel — getExchangeRate() hits an external API sequentially
+  const [{ data: tokens }, rate, prices] = await Promise.all([
+    db.from("tokens").select("*").eq("is_native", false).order("whitelisted_at", { ascending: false }).limit(50),
     getExchangeRate(),
     redis.get<Record<string, string>>(CacheKeys.binanceAllTickers()),
   ]);
 
-  // First 60 (rank 1-60) are in the WS stream — include prices from Redis
-  // Tokens 61+ include metadata only; client fetches prices on demand
-  const WS_LIMIT = 60;
-  const overview = (tokens ?? []).map((t, i) => {
-    const tickerKey = `${t.symbol}USDT`;
-    const inWs      = i < WS_LIMIT;
-    const price     = inWs ? (wsprices?.[tickerKey] ?? "0") : "0";
+  const overview = (tokens ?? []).map((t) => {
+    const price = prices?.[`${t.symbol}USDT`] ?? "0";
     return {
       address: t.address,
-      symbol:  t.symbol,
-      name:    t.name,
+      symbol: t.symbol,
+      name: t.name,
       price,
       iconUrl: t.icon_url,
-      isNew:   t.is_new,
-      isSeed:  t.is_seed,
-      rank:    (t.rank ?? i + 1),
-      volume:  "0",
+      isNew: t.is_new,
+      isSeed: t.is_seed,
       kesPrice: price !== "0"
         ? (parseFloat(price) * parseFloat(rate.kesPerUsd)).toFixed(2)
         : "0",
     };
   });
 
-  // Cache for 30 seconds
-  await redis.set(CACHE_KEY, JSON.stringify(overview), { ex: 30 }).catch(() => undefined);
   return c.json({ success: true, data: overview });
 });
 
@@ -81,7 +65,7 @@ market.get("/candles/:tokenAddress", async (c) => {
 
   const binanceIntervalMap: Record<string, string> = {
     "15m": "15m", "hour": "1h", "1h": "1h",
-    "4h": "4h", "day": "1d", "1D": "1d", "1W": "1w", "3m": "3M",
+    "4h": "4h", "day": "1d", "1D": "1d", "1W": "1w", "3m": "3m",
   };
   const binanceInterval = binanceIntervalMap[interval] ?? "1h";
 
@@ -287,63 +271,6 @@ market.get("/ticker/:symbol", async (c) => {
   } catch {
     return c.json({ success: false, error: "Ticker unavailable", statusCode: 503 }, 503);
   }
-});
-
-/* ─── GET /prices?symbols=BTC,ETH,... — batch price fetch ───────────────── */
-// Used by markets page for tokens 61-200 that aren't in the WS stream.
-// Returns prices from Binance REST, cached per-symbol for 5s in Redis.
-
-market.get("/prices", authMiddleware, async (c) => {
-  const symbolsParam = c.req.query("symbols") ?? "";
-  if (!symbolsParam) return c.json({ success: true, data: {} });
-
-  const symbols = symbolsParam
-    .split(",")
-    .map((s) => s.trim().toUpperCase())
-    .filter((s) => /^[A-Z0-9]{2,12}$/.test(s))
-    .slice(0, 50); // max 50 per request
-
-  if (symbols.length === 0) return c.json({ success: true, data: {} });
-
-  // Check Redis for each symbol first
-  const result: Record<string, { price: string; change: string; volume: string }> = {};
-  const missing: string[] = [];
-
-  for (const sym of symbols) {
-    const cached = await redis.get<{ price: string; change: string; volume: string }>(
-      `market:price:${sym}`
-    ).catch(() => null);
-    if (cached) {
-      result[sym] = cached;
-    } else {
-      missing.push(sym);
-    }
-  }
-
-  // Fetch missing from Binance in parallel (batches of 10)
-  if (missing.length > 0) {
-    const batchSize = 10;
-    for (let i = 0; i < missing.length; i += batchSize) {
-      const batch = missing.slice(i, i + batchSize);
-      const fetches = batch.map(async (sym) => {
-        try {
-          const res = await fetch(
-            `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}USDT`,
-            { signal: AbortSignal.timeout(4000) }
-          );
-          if (!res.ok) return;
-          const d = await res.json() as { lastPrice: string; priceChangePercent: string; quoteVolume: string };
-          const entry = { price: d.lastPrice, change: d.priceChangePercent, volume: d.quoteVolume };
-          result[sym] = entry;
-          // Cache 5 seconds
-          await redis.set(`market:price:${sym}`, entry, { ex: 5 }).catch(() => undefined);
-        } catch { /* skip failed symbols */ }
-      });
-      await Promise.all(fetches);
-    }
-  }
-
-  return c.json({ success: true, data: result });
 });
 
 /* ─── GET /usdt-kes ─────────────────────────────────────────────────────── */
@@ -576,7 +503,7 @@ market.get("/honeypot/:address", authMiddleware, async (c) => {
 market.get("/returns/:symbol", authMiddleware, async (c) => {
   const { symbol } = c.req.param();
   const clean = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (!clean || clean.length > 12) {
+  if (!clean || clean.length > 20) {
     return c.json({ success: false, error: "Invalid symbol", statusCode: 400 }, 400);
   }
 
@@ -584,9 +511,14 @@ market.get("/returns/:symbol", authMiddleware, async (c) => {
   const cached = await redis.get(cacheKey);
   if (cached) return c.json({ success: true, data: cached });
 
+  // If symbol already ends with a known quote currency, use it as-is
+  const QUOTE_CURRENCIES = ["USDT", "USDC", "FDUSD", "BTC", "ETH", "BNB", "TRY", "EUR", "BRL", "ARS", "JPY", "PLN", "BUSD"];
+  const hasQuote = QUOTE_CURRENCIES.some((q) => clean.endsWith(q) && clean.length > q.length);
+  const binanceSymbol = hasQuote ? clean : `${clean}USDT`;
+
   try {
     const res = await fetch(
-      `https://api.binance.com/api/v3/klines?symbol=${clean}USDT&interval=1d&limit=365`,
+      `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=1d&limit=365`,
       { signal: AbortSignal.timeout(8000) }
     );
     if (!res.ok) throw new Error("Binance klines unavailable");
@@ -615,6 +547,423 @@ market.get("/returns/:symbol", authMiddleware, async (c) => {
   } catch {
     return c.json({ success: false, error: "Returns data unavailable", statusCode: 503 }, 503);
   }
+});
+
+/* ─── GET /coins — unified paginated coin list with prices from Redis ──────
+ *
+ * Primary path: Redis price blob + Supabase metadata (zero Binance calls).
+ * Fallback path: when tokens table is empty OR Redis has no prices, fetches
+ * live from Binance 24hr ticker and synthesises coin objects on the fly.
+ * This ensures the markets page always shows coins regardless of cron state.
+ *
+ * Query params:
+ *   page    number  default 1
+ *   limit   number  default 50, max 100
+ *   tab     string  "all" | "gainers" | "losers" | "hot" | "favourites"
+ *   chain   string  optional chain filter e.g. "1" (Ethereum), "56" (BSC), "SOL"
+ *   search  string  optional symbol/name filter
+ */
+
+// CMC logo CDN — reliable fallback logos for common coins
+const CMC_LOGO = (cmcId: number) =>
+  `https://s2.coinmarketcap.com/static/img/coins/64x64/${cmcId}.png`;
+
+// Well-known coins with CMC IDs for logo fallback when DB is cold
+const KNOWN_COINS: Record<string, { name: string; cmcId: number; rank: number }> = {
+  BTC:  { name: "Bitcoin",        cmcId: 1,    rank: 1  },
+  ETH:  { name: "Ethereum",       cmcId: 1027, rank: 2  },
+  USDT: { name: "Tether",         cmcId: 825,  rank: 3  },
+  BNB:  { name: "BNB",            cmcId: 1839, rank: 4  },
+  SOL:  { name: "Solana",         cmcId: 5426, rank: 5  },
+  USDC: { name: "USD Coin",       cmcId: 3408, rank: 6  },
+  XRP:  { name: "XRP",            cmcId: 52,   rank: 7  },
+  DOGE: { name: "Dogecoin",       cmcId: 74,   rank: 8  },
+  TRX:  { name: "TRON",           cmcId: 1958, rank: 9  },
+  ADA:  { name: "Cardano",        cmcId: 2010, rank: 10 },
+  AVAX: { name: "Avalanche",      cmcId: 5805, rank: 11 },
+  SHIB: { name: "Shiba Inu",      cmcId: 5994, rank: 12 },
+  LINK: { name: "Chainlink",      cmcId: 1975, rank: 13 },
+  DOT:  { name: "Polkadot",       cmcId: 6636, rank: 14 },
+  TON:  { name: "Toncoin",        cmcId: 11419,rank: 15 },
+  MATIC:{ name: "Polygon",        cmcId: 3890, rank: 16 },
+  WBTC: { name: "Wrapped Bitcoin",cmcId: 3717, rank: 17 },
+  ICP:  { name: "Internet Computer",cmcId: 8916,rank: 18},
+  DAI:  { name: "Dai",            cmcId: 4943, rank: 19 },
+  LTC:  { name: "Litecoin",       cmcId: 2,    rank: 20 },
+  BCH:  { name: "Bitcoin Cash",   cmcId: 1831, rank: 21 },
+  UNI:  { name: "Uniswap",        cmcId: 7083, rank: 22 },
+  NEAR: { name: "NEAR Protocol",  cmcId: 6535, rank: 23 },
+  ATOM: { name: "Cosmos",         cmcId: 3794, rank: 24 },
+  XLM:  { name: "Stellar",        cmcId: 512,  rank: 25 },
+  ETC:  { name: "Ethereum Classic",cmcId: 1321,rank: 26 },
+  XMR:  { name: "Monero",         cmcId: 328,  rank: 27 },
+  APT:  { name: "Aptos",          cmcId: 21794,rank: 28 },
+  FIL:  { name: "Filecoin",       cmcId: 2280, rank: 29 },
+  ARB:  { name: "Arbitrum",       cmcId: 11841,rank: 30 },
+  VET:  { name: "VeChain",        cmcId: 3077, rank: 31 },
+  OP:   { name: "Optimism",       cmcId: 11840,rank: 32 },
+  MKR:  { name: "Maker",          cmcId: 1518, rank: 33 },
+  HBAR: { name: "Hedera",         cmcId: 4642, rank: 34 },
+  GRT:  { name: "The Graph",      cmcId: 6719, rank: 35 },
+  ALGO: { name: "Algorand",       cmcId: 4030, rank: 36 },
+  AAVE: { name: "Aave",           cmcId: 7278, rank: 37 },
+  QNT:  { name: "Quant",          cmcId: 3155, rank: 38 },
+  STX:  { name: "Stacks",         cmcId: 4847, rank: 39 },
+  SAND: { name: "The Sandbox",    cmcId: 6210, rank: 40 },
+  MANA: { name: "Decentraland",   cmcId: 1966, rank: 41 },
+  AXS:  { name: "Axie Infinity",  cmcId: 6783, rank: 42 },
+  EOS:  { name: "EOS",            cmcId: 1765, rank: 43 },
+  THETA:{ name: "Theta Network",  cmcId: 2416, rank: 44 },
+  XTZ:  { name: "Tezos",          cmcId: 2011, rank: 45 },
+  FTM:  { name: "Fantom",         cmcId: 3513, rank: 46 },
+  EGLD: { name: "MultiversX",     cmcId: 6892, rank: 47 },
+  FLOW: { name: "Flow",           cmcId: 4558, rank: 48 },
+  ROSE: { name: "Oasis Network",  cmcId: 7653, rank: 49 },
+  KAVA: { name: "Kava",           cmcId: 4846, rank: 50 },
+};
+
+async function fetchBinanceFallback(
+  search: string,
+  tab: string,
+  offset: number,
+  limit: number,
+): Promise<{ data: unknown[]; total: number }> {
+  try {
+    const res = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return { data: [], total: 0 };
+
+    const tickers = await res.json() as Array<{
+      symbol: string; lastPrice: string; priceChangePercent: string;
+      quoteVolume: string; highPrice: string; lowPrice: string;
+    }>;
+
+    // Only USDT pairs, non-zero price
+    let coins = tickers
+      .filter((t) => t.symbol.endsWith("USDT") && parseFloat(t.lastPrice) > 0)
+      .map((t) => {
+        const sym = t.symbol.replace("USDT", "");
+        const known = KNOWN_COINS[sym];
+        return {
+          symbol:      sym,
+          name:        known?.name ?? sym,
+          logo_url:    known ? CMC_LOGO(known.cmcId) : "",
+          cmc_rank:    known?.rank ?? 9999,
+          chain_ids:   [] as string[],
+          is_depositable: false,
+          price:       t.lastPrice,
+          change_24h:  t.priceChangePercent,
+          change_1h:   "0",
+          volume_24h:  t.quoteVolume,
+          high_24h:    t.highPrice,
+          low_24h:     t.lowPrice,
+          source:      "binance",
+        };
+      });
+
+    if (search) {
+      coins = coins.filter((c) =>
+        c.symbol.includes(search) || c.name.toUpperCase().includes(search)
+      );
+    }
+
+    // Sort by tab
+    if (tab === "gainers") {
+      coins.sort((a, b) => parseFloat(b.change_24h) - parseFloat(a.change_24h));
+    } else if (tab === "losers") {
+      coins.sort((a, b) => parseFloat(a.change_24h) - parseFloat(b.change_24h));
+    } else if (tab === "hot") {
+      coins.sort((a, b) =>
+        Math.abs(parseFloat(b.change_24h)) * Math.log10(parseFloat(b.volume_24h) + 1) -
+        Math.abs(parseFloat(a.change_24h)) * Math.log10(parseFloat(a.volume_24h) + 1)
+      );
+    } else {
+      // "all" — sort by volume desc (most liquid first)
+      coins.sort((a, b) => parseFloat(b.volume_24h) - parseFloat(a.volume_24h));
+    }
+
+    return { data: coins.slice(offset, offset + limit), total: coins.length };
+  } catch {
+    return { data: [], total: 0 };
+  }
+}
+
+market.get("/coins", authMiddleware, async (c) => {
+  const page   = Math.max(1, parseInt(c.req.query("page")  ?? "1"));
+  const limit  = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "50")), 100);
+  const tab    = (c.req.query("tab") ?? "all").toLowerCase();
+  const chain  = c.req.query("chain") ?? "";
+  const search = (c.req.query("search") ?? "").toUpperCase().trim();
+  const offset = (page - 1) * limit;
+
+  const db = getDb();
+
+  // ── For gainers / losers / hot — try Redis pre-computed lists first
+  if ((tab === "gainers" || tab === "losers" || tab === "hot") && !chain && !search) {
+    const keyMap: Record<string, string> = {
+      gainers: "market:gainers:24h",
+      losers:  "market:losers:24h",
+      hot:     "market:hot",
+    };
+    const raw = await redis.get<string>(keyMap[tab]!);
+    if (raw) {
+      const list = (typeof raw === "string" ? JSON.parse(raw) : raw) as unknown[];
+      const sliced = (list as Array<Record<string, unknown>>).slice(offset, offset + limit);
+      return c.json({
+        success: true,
+        data: sliced,
+        meta: { page, limit, total: list.length, tab },
+      });
+    }
+    // Redis cold — fall through to live Binance path below
+  }
+
+  // ── Load price blob from Redis
+  const priceRaw = await redis.get<string>("market:prices");
+  const prices: Record<string, {
+    price: string; change_24h: string; change_1h: string;
+    volume_24h: string; high_24h: string; low_24h: string; source: string;
+  }> = priceRaw ? (typeof priceRaw === "string" ? JSON.parse(priceRaw) : priceRaw) : {};
+
+  const hasPrices = Object.keys(prices).length > 0;
+
+  // ── Load tokens from Supabase
+  let query = db
+    .from("tokens")
+    .select("id, symbol, name, logo_url, cmc_rank, chain_ids, is_depositable")
+    .eq("is_active", true)
+    .order("cmc_rank", { ascending: true });
+
+  if (chain) query = query.contains("chain_ids", [chain]);
+  if (search) query = query.or(`symbol.ilike.%${search}%,name.ilike.%${search}%`);
+
+  const { data: tokens, error } = await query;
+
+  if (error) {
+    return c.json({ success: false, error: "Failed to load coins", statusCode: 500 }, 500);
+  }
+
+  const hasTokens = (tokens ?? []).length > 0;
+
+  // ── If no tokens in DB OR no prices in Redis — fall back to live Binance
+  if (!hasTokens || !hasPrices) {
+    const { data, total } = await fetchBinanceFallback(search, tab, offset, limit);
+    return c.json({
+      success: true,
+      data,
+      meta: { page, limit, total, tab, chain: chain || null, source: "binance_fallback" },
+    });
+  }
+
+  // ── Primary path: merge DB tokens with Redis prices
+  let merged = (tokens ?? [])
+    .map((t) => {
+      const p = prices[t.symbol];
+      if (!p) return null;
+      return {
+        symbol:         t.symbol,
+        name:           t.name,
+        logo_url:       t.logo_url,
+        cmc_rank:       t.cmc_rank,
+        chain_ids:      t.chain_ids,
+        is_depositable: t.is_depositable,
+        price:          p.price,
+        change_24h:     p.change_24h,
+        change_1h:      p.change_1h,
+        volume_24h:     p.volume_24h,
+        high_24h:       p.high_24h,
+        low_24h:        p.low_24h,
+        source:         p.source,
+      };
+    })
+    .filter(Boolean) as NonNullable<ReturnType<typeof Array.prototype.map>>[];
+
+  // ── If merged is still empty (tokens exist but no prices matched), fall back
+  if (merged.length === 0) {
+    const { data, total } = await fetchBinanceFallback(search, tab, offset, limit);
+    return c.json({
+      success: true,
+      data,
+      meta: { page, limit, total, tab, chain: chain || null, source: "binance_fallback" },
+    });
+  }
+
+  // ── Tab sorting on merged results
+  if (tab === "gainers") {
+    merged = [...merged].sort((a, b) =>
+      parseFloat((b as { change_24h: string }).change_24h) - parseFloat((a as { change_24h: string }).change_24h)
+    );
+  } else if (tab === "losers") {
+    merged = [...merged].sort((a, b) =>
+      parseFloat((a as { change_24h: string }).change_24h) - parseFloat((b as { change_24h: string }).change_24h)
+    );
+  }
+
+  const total  = merged.length;
+  const sliced = merged.slice(offset, offset + limit);
+
+  return c.json({
+    success: true,
+    data:    sliced,
+    meta: { page, limit, total, tab, chain: chain || null },
+  });
+});
+
+/* ─── GET /coins/:symbol — single coin detail with full metadata ───────── */
+
+market.get("/coins/:symbol", authMiddleware, async (c) => {
+  const symbol = c.req.param("symbol").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!symbol) return c.json({ success: false, error: "Invalid symbol", statusCode: 400 }, 400);
+
+  const cacheKey = `coin:detail:${symbol}`;
+  const cached = await redis.get(cacheKey);
+  if (cached) return c.json({ success: true, data: cached });
+
+  const db = getDb();
+
+  const { data: token, error } = await db
+    .from("tokens")
+    .select("*")
+    .eq("symbol", symbol)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !token) {
+    return c.json({ success: false, error: "Coin not found", statusCode: 404 }, 404);
+  }
+
+  // Merge current price from Redis
+  const priceRaw = await redis.get<string>("market:prices");
+  const prices: Record<string, { price: string; change_24h: string; change_1h: string; volume_24h: string; high_24h: string; low_24h: string }> =
+    priceRaw ? (typeof priceRaw === "string" ? JSON.parse(priceRaw) : priceRaw) : {};
+  const livePrice = prices[symbol];
+
+  const detail = {
+    symbol:            token.symbol,
+    name:              token.name,
+    logo_url:          token.logo_url,
+    cmc_rank:          token.cmc_rank,
+    description:       token.description,
+    whitepaper_url:    token.whitepaper_url,
+    website_url:       token.website_url,
+    twitter_url:       token.twitter_url,
+    telegram_url:      token.telegram_url,
+    reddit_url:        token.reddit_url,
+    explorer_urls:     token.explorer_urls,
+    ath:               token.ath,
+    ath_date:          token.ath_date,
+    atl:               token.atl,
+    atl_date:          token.atl_date,
+    circulating_supply:token.circulating_supply,
+    max_supply:        token.max_supply,
+    chain_ids:         token.chain_ids,
+    is_depositable:    token.is_depositable,
+    price:             livePrice?.price      ?? "0",
+    change_24h:        livePrice?.change_24h ?? "0",
+    change_1h:         livePrice?.change_1h  ?? "0",
+    volume_24h:        livePrice?.volume_24h ?? "0",
+    high_24h:          livePrice?.high_24h   ?? "0",
+    low_24h:           livePrice?.low_24h    ?? "0",
+  };
+
+  await redis.set(cacheKey, detail, { ex: 60 }); // 1 min cache for detail page
+  return c.json({ success: true, data: detail });
+});
+
+/* ─── GET /home — bundled home page data in one call ───────────────────── */
+
+market.get("/home", authMiddleware, async (c) => {
+  const cacheKeyPrefix = "market:home";
+
+  // Fear & Greed — served from existing cache
+  const fearGreed = await redis.get(CacheKeys.fearGreed());
+
+  // Fear & Greed 30-day history for the curve
+  const db = getDb();
+  const { data: fgHistory } = await db
+    .from("fear_greed_history")
+    .select("date, value, label")
+    .order("date", { ascending: true })
+    .limit(30);
+
+  // Get price blob
+  const priceRaw = await redis.get<string>("market:prices");
+  const prices: Record<string, { price: string; change_24h: string; name: string; logo_url: string }> =
+    priceRaw ? (typeof priceRaw === "string" ? JSON.parse(priceRaw) : priceRaw) : {};
+
+  // 2 majors always: BTC + ETH — if missing from Redis, fetch live from Binance
+  let majors = ["BTC", "ETH"]
+    .map((s) => prices[s] ? { symbol: s, ...prices[s] } : null)
+    .filter(Boolean);
+
+  if (majors.length === 0) {
+    try {
+      const btcEthRes = await fetch(
+        "https://api.binance.com/api/v3/ticker/24hr?symbols=[\"BTCUSDT\",\"ETHUSDT\",\"BNBUSDT\",\"SOLUSDT\",\"XRPUSDT\"]",
+        { signal: AbortSignal.timeout(5000) }
+      );
+      if (btcEthRes.ok) {
+        const tickers = await btcEthRes.json() as Array<{
+          symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume: string;
+        }>;
+        const KNOWN_COINS_HOME: Record<string, { name: string; cmcId: number }> = {
+          BTC: { name: "Bitcoin",  cmcId: 1    },
+          ETH: { name: "Ethereum", cmcId: 1027 },
+          BNB: { name: "BNB",      cmcId: 1839 },
+          SOL: { name: "Solana",   cmcId: 5426 },
+          XRP: { name: "XRP",      cmcId: 52   },
+        };
+        majors = tickers.map((t) => {
+          const sym = t.symbol.replace("USDT", "");
+          const info = KNOWN_COINS_HOME[sym];
+          return {
+            symbol:     sym,
+            name:       info?.name ?? sym,
+            logo_url:   info ? `https://s2.coinmarketcap.com/static/img/coins/64x64/${info.cmcId}.png` : "",
+            price:      t.lastPrice,
+            change_24h: t.priceChangePercent,
+          };
+        }).filter(Boolean) as typeof majors;
+      }
+    } catch { /* keep majors empty */ }
+  }
+
+  // Top 3 gainers from pre-computed list
+  const gainersRaw = await redis.get<string>("market:gainers:24h");
+  const gainers = gainersRaw
+    ? (typeof gainersRaw === "string" ? JSON.parse(gainersRaw) : gainersRaw) as Array<Record<string, string>>
+    : [];
+  const topGainers = gainers.slice(0, 3);
+
+  // Market overview numbers from Binance global (cached)
+  const overviewCacheKey = "market:home:overview";
+  let overview = await redis.get(overviewCacheKey);
+  if (!overview) {
+    try {
+      const res = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const tickers = await res.json() as Array<{ quoteVolume: string }>;
+        const totalVolume = tickers.reduce((acc, t) => acc + parseFloat(t.quoteVolume || "0"), 0);
+        overview = { totalVolume24h: totalVolume.toFixed(0) };
+        await redis.set(overviewCacheKey, overview, { ex: 300 }); // 5 min
+      }
+    } catch {
+      overview = { totalVolume24h: "0" };
+    }
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      homeCoins:   [...majors, ...topGainers].slice(0, 5),
+      fearGreed:   fearGreed ?? { value: 50, classification: "Neutral", timestamp: null },
+      fgHistory:   fgHistory ?? [],
+      overview,
+    },
+  });
 });
 
 export default market;

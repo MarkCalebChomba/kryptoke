@@ -402,10 +402,6 @@ export interface Database {
           is_new: boolean;
           is_seed: boolean;
           icon_url: string | null;
-          rank: number | null;
-          futures_enabled: boolean | null;
-          chain: string | null;
-          market_cap_usd: number | null;
         };
         Insert: {
           address: string;
@@ -418,10 +414,6 @@ export interface Database {
           is_new?: boolean;
           is_seed?: boolean;
           icon_url?: string | null;
-          rank?: number | null;
-          futures_enabled?: boolean | null;
-          chain?: string | null;
-          market_cap_usd?: number | null;
         };
         Update: {
           symbol?: string;
@@ -432,50 +424,6 @@ export interface Database {
           is_new?: boolean;
           is_seed?: boolean;
           icon_url?: string | null;
-          rank?: number | null;
-          futures_enabled?: boolean | null;
-          chain?: string | null;
-          market_cap_usd?: number | null;
-        };
-      };
-
-      exchange_keys: {
-        Row: {
-          id: string;
-          exchange: "okx" | "binance" | "bybit";
-          label: string;
-          api_key: string;
-          api_secret: string;
-          passphrase: string | null;
-          is_active: boolean;
-          is_testnet: boolean;
-          priority: number;
-          last_used_at: string | null;
-          error_count: number;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          exchange: "okx" | "binance" | "bybit";
-          label?: string;
-          api_key: string;
-          api_secret: string;
-          passphrase?: string | null;
-          is_active?: boolean;
-          is_testnet?: boolean;
-          priority?: number;
-        };
-        Update: {
-          label?: string;
-          api_key?: string;
-          api_secret?: string;
-          passphrase?: string | null;
-          is_active?: boolean;
-          is_testnet?: boolean;
-          priority?: number;
-          last_used_at?: string | null;
-          error_count?: number;
-          updated_at?: string;
         };
       };
 

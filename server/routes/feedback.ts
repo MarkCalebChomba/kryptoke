@@ -5,7 +5,6 @@ import { authMiddleware } from "@/server/middleware/auth";
 import { withApiRateLimit } from "@/server/middleware/ratelimit";
 import { getDb } from "@/server/db/client";
 import { findUserByUid } from "@/server/db/users";
-import { verifyJwt } from "@/server/services/jwt";
 
 const feedback = new Hono();
 
@@ -49,7 +48,7 @@ feedback.post(
     let uid: string | null = null;
     if (authHeader?.startsWith("Bearer ")) {
       try {
-        
+        const { verifyJwt } = await import("@/server/services/jwt");
         const payload = await verifyJwt(authHeader.slice(7));
         uid = payload.uid;
       } catch {

@@ -8,7 +8,6 @@ import {
   apiSecurityHeaders,
   safaricomIpGuard,
 } from "./middleware/security";
-import { getCached, CacheKeys } from "@/lib/redis/client";
 import authRoutes from "./routes/auth";
 import walletRoutes from "./routes/wallet";
 import mpesaRoutes from "./routes/mpesa";
@@ -22,10 +21,6 @@ import earnRoutes from "./routes/earn";
 import analyticsRoutes from "./routes/analytics";
 import futuresRoutes from "./routes/futures";
 import adminRoutes from "./routes/admin/index";
-import p2pRoutes      from "./routes/p2p";
-import referralRoutes from "./routes/referral";
-import rewardsRoutes  from "./routes/rewards";
-import accountRoutes  from "./routes/account";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -79,7 +74,7 @@ app.use("*", async (c, next) => {
     await next();
     return;
   }
-  
+  const { getCached, CacheKeys } = await import("@/lib/redis/client");
   const config = await getCached<{ maintenanceMode?: boolean }>(CacheKeys.systemConfig());
   if (config?.maintenanceMode) {
     return c.json({
@@ -120,11 +115,7 @@ app.route("/tokens", tokenRoutes);
 app.route("/notifications", notificationRoutes);
 app.route("/earn", earnRoutes);
 app.route("/analytics", analyticsRoutes);
-app.route("/admin",    adminRoutes);
-app.route("/p2p",      p2pRoutes);
-app.route("/referral", referralRoutes);
-app.route("/rewards",  rewardsRoutes);
-app.route("/account",  accountRoutes);
+app.route("/admin", adminRoutes);
 app.route("/", feedbackRoutes);
 
 /* ─── 404 ────────────────────────────────────────────────────────────────── */

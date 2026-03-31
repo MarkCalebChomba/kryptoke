@@ -44,40 +44,51 @@ export function TradingViewWidget({
   const tvInterval = TV_INTERVALS[interval] ?? "60";
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    // Clear previous widget
-    containerRef.current.innerHTML = "";
-    if (scriptRef.current) {
-      scriptRef.current.remove();
-    }
+    // Small delay to ensure DOM is fully mounted before TradingView script runs
+    const timer = setTimeout(() => {
+      if (!containerRef.current) return;
 
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.type = "text/javascript";
-    script.async = true;
-    script.innerHTML = JSON.stringify({
-      autosize: true,
-      symbol: tvSymbol,
-      interval: tvInterval,
-      timezone: "Africa/Nairobi",
-      theme: "dark",
-      style: "1",
-      locale: "en",
-      backgroundColor: "#0E1420",
-      gridColor: "#1C2840",
-      hide_top_toolbar: false,
-      hide_legend: false,
-      save_image: false,
-      hide_volume: false,
-      support_host: "https://www.tradingview.com",
-    });
+      // Clear previous widget
+      containerRef.current.innerHTML = "";
+      if (scriptRef.current) {
+        scriptRef.current.remove();
+        scriptRef.current = null;
+      }
 
-    containerRef.current.appendChild(script);
-    scriptRef.current = script;
+      const script = document.createElement("script");
+      script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+      script.type = "text/javascript";
+      script.async = true;
+      script.innerHTML = JSON.stringify({
+        autosize: true,
+        symbol: tvSymbol,
+        interval: tvInterval,
+        timezone: "Africa/Nairobi",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        backgroundColor: "#0E1420",
+        gridColor: "#1C2840",
+        hide_top_toolbar: false,
+        hide_legend: false,
+        save_image: false,
+        hide_volume: false,
+        support_host: "https://www.tradingview.com",
+      });
+
+      containerRef.current.appendChild(script);
+      scriptRef.current = script;
+    }, 50);
 
     return () => {
-      script.remove();
+      clearTimeout(timer);
+      if (scriptRef.current) {
+        scriptRef.current.remove();
+        scriptRef.current = null;
+      }
     };
   }, [tvSymbol, tvInterval]);
 

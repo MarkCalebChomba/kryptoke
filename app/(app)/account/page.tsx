@@ -221,6 +221,14 @@ export default function AccountPage() {
   const [kycOpen,        setKycOpen]        = useState(false);
   const [whitelistOpen,  setWhitelistOpen]  = useState(false);
 
+  /* roadmap sheets for genuine future features */
+  const [roadmap, setRoadmap] = useState<{ open: boolean; title: string; description: string; eta?: string }>({
+    open: false, title: "", description: "",
+  });
+  function showRoadmap(title: string, description: string, eta?: string) {
+    setRoadmap({ open: true, title, description, eta });
+  }
+
   function copyUid() {
     navigator.clipboard.writeText(user?.uid ?? "");
     toast.copied();
@@ -264,7 +272,7 @@ export default function AccountPage() {
       {/* Avatar + name */}
       <div className="flex items-center gap-4 px-4 py-4 border-b border-border">
         <button
-          onClick={() => router.push("/account/profile")}
+          onClick={() => showRoadmap("Edit Profile", "Update your display name and profile picture.", "Q3 2025")}
           className="relative flex-shrink-0"
         >
           <div className="w-16 h-16 rounded-full border-2 border-primary/30 bg-primary/10 flex items-center justify-center overflow-hidden">
@@ -350,7 +358,7 @@ export default function AccountPage() {
 
             <SettingRow
               icon={IconChart} label="Trading fee tier" value="Regular user"
-              onClick={() => router.push("/analysis")}
+              onClick={() => showRoadmap("Fee Tiers", "Volume-based fee tiers unlock at $10,000 monthly trading volume.", "Q4 2025")}
             />
           </div>
 
@@ -361,11 +369,11 @@ export default function AccountPage() {
             {[
               {
                 icon: IconHelp, label: "Get Help",
-                action: () => router.push("/faq"),
+                action: () => showRoadmap("Live Support", "24/7 live chat and email support is coming soon. For now, check the FAQ or reach us on Telegram.", "Q3 2025"),
               },
               {
                 icon: IconChart, label: "Demo Trade",
-                action: () => router.push("/trade?demo=1"),
+                action: () => showRoadmap("Demo Trading", "Practice trading with virtual funds before going live. No real money at risk.", "Q4 2025"),
               },
               {
                 icon: IconGift, label: "Referral",
@@ -376,7 +384,7 @@ export default function AccountPage() {
               },
               {
                 icon: IconFlag, label: "Campaigns",
-                action: () => router.push("/rewards"),
+                action: () => showRoadmap("Campaigns", "Earn bonus rewards through trading competitions and promotional campaigns.", "Q4 2025"),
               },
             ].map(({ icon: Icon, label, action }) => (
               <button key={label} onClick={action}
@@ -391,29 +399,16 @@ export default function AccountPage() {
             <SettingRow icon={IconChart} label="Analysis" onClick={() => router.push("/analysis")} />
             <SettingRow
               icon={IconUsers} label="Community"
-              onClick={() => window.open("https://t.me/kryptoke_ke", "_blank")}
+              onClick={() => showRoadmap("Community", "Join KryptoKe discussions, get trading signals, and connect with other Kenyan traders.", "Q3 2025")}
             />
             <SettingRow
               icon={IconDownload} label="Account statement"
-              onClick={async () => {
-                try {
-                  const res = await fetch("/api/v1/analytics/export-csv", {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("_kk_s1") ?? ""}` },
-                  });
-                  if (!res.ok) throw new Error();
-                  const blob = await res.blob();
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url; a.download = "kryptoke-statement.csv"; a.click();
-                  URL.revokeObjectURL(url);
-                } catch {
-                  toast.error("Statement unavailable", "Please try again shortly");
-                }
-              }}
+              onClick={() => showRoadmap("Account Statement", "Download a full PDF statement of your transaction history for tax reporting.", "Q3 2025")}
             />
             <SettingRow
               icon={IconApi} label="API Access"
-              onClick={() => router.push("/account/api")}
+              onClick={() => showRoadmap("API Access", "Integrate KryptoKe with your own trading bots using our REST API. Full documentation coming soon.", "Q1 2026")}
+              badge="SOON"
             />
             <SettingRow icon={IconHelp} label="FAQ" onClick={() => router.push("/faq")} />
             <SettingRow icon={IconHelp} label="About KryptoKe" onClick={() => router.push("/about")} />
@@ -521,19 +516,19 @@ export default function AccountPage() {
           <SettingRow
             icon={IconGlobe} label="Language"
             value={user.language === "sw" ? "Swahili" : "English"}
-            onClick={() => toast.success("English only", "Additional languages coming soon")}
+            onClick={() => showRoadmap("Language", "Switch between English and Swahili. Kiswahili interface coming soon.", "Q4 2025")}
           />
           <SettingRow
-            label="Currency" value="KES / USD"
-            onClick={() => toast.success("KES + USD", "Both currencies are shown throughout the app")}
+            label="Currency" value="KES"
+            onClick={() => showRoadmap("Currency Display", "Choose whether values display in KES, USD, or both.", "Q4 2025")}
           />
           <SettingRow
             label="Appearance" value="Dark"
-            onClick={() => toast.success("Dark mode", "Light mode option coming soon")}
+            onClick={() => showRoadmap("Appearance", "Light mode and system-default theme options coming soon.", "Q4 2025")}
           />
           <SettingRow
             label="Notifications"
-            onClick={() => router.push("/notifications")}
+            onClick={() => showRoadmap("Notifications", "Manage push, email, and SMS notification preferences per event type.", "Q3 2025")}
           />
           <SettingRow label="Privacy Policy" onClick={() => router.push("/privacy")} />
           <SettingRow label="Terms of Use"   onClick={() => router.push("/terms")}   />
@@ -551,6 +546,13 @@ export default function AccountPage() {
       <KycSheet               isOpen={kycOpen}         onClose={() => setKycOpen(false)} />
       <WhitelistSheet         isOpen={whitelistOpen}   onClose={() => setWhitelistOpen(false)} />
 
+      <RoadmapSheet
+        isOpen={roadmap.open}
+        onClose={() => setRoadmap(r => ({ ...r, open: false }))}
+        title={roadmap.title}
+        description={roadmap.description}
+        eta={roadmap.eta}
+      />
     </div>
   );
 }

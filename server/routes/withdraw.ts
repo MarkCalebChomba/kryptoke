@@ -33,8 +33,6 @@ import { getDb } from "@/server/db/client";
 import { Notifications } from "@/server/services/notifications";
 import { isValidKenyanPhone } from "@/lib/utils/formatters";
 import { subtract, add, lt } from "@/lib/utils/money";
-import { redis } from "@/lib/redis/client";
-import { CHAINS } from "@/server/services/blockchain";
 import Big from "big.js";
 
 const withdraw = new Hono();
@@ -72,7 +70,7 @@ async function getChainFee(chainId: string, assetSymbol: string): Promise<{ flat
 
 async function getUsdEquivalent(asset: string, amount: string): Promise<number> {
   if (asset === "USDT" || asset === "USDC") return parseFloat(amount);
-  
+  const { redis } = await import("@/lib/redis/client");
   const prices = await redis.get<Record<string, string>>("binance:tickers").catch(() => null);
   const price = prices?.[`${asset}USDT`] ?? "1";
   return parseFloat(amount) * parseFloat(price);
@@ -190,7 +188,7 @@ withdraw.post("/mpesa-usdt", withSensitiveRateLimit(),
       assetCost = new Big(kesAmount).div(kesPerUsd).toFixed(6);
     } else {
       // Look up live price from Redis (set by Binance WS)
-      
+      const { redis } = await import("@/lib/redis/client");
       const prices = await redis.get<Record<string, string>>("binance:tickers").catch(() => null);
       const priceStr = prices?.[`${asset}USDT`];
       if (!priceStr || parseFloat(priceStr) <= 0) {
@@ -314,7 +312,7 @@ withdraw.post("/crypto", withSensitiveRateLimit(),
 
     let chainName = chainId;
     if (/^\d+$/.test(chainId)) {
-      
+      const { CHAINS } = await import("@/server/services/blockchain");
       chainName = CHAINS[parseInt(chainId)]?.name ?? chainId;
     } else {
       const { data: nc } = await db.from("non_evm_chains").select("name").eq("id", chainId).maybeSingle();
@@ -392,7 +390,7 @@ withdraw.get("/chains/:asset", withApiRateLimit(), async (c) => {
     db.from("non_evm_chains").select("*").eq("withdraw_enabled", true).order("sort_order"),
   ]);
   const freezeMap = new Map((freezes ?? []).map((f) => [f.chain_id, f]));
-  
+  const { CHAINS } = await import("@/server/services/blockchain");
 
   const evmChains = Object.values(CHAINS).map((ch) => {
     const feeRow = fees?.find((f) => f.chain_id === String(ch.id));

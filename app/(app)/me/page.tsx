@@ -278,7 +278,7 @@ export default function WalletPage() {
         {/* Action buttons */}
         <div className="grid grid-cols-4 gap-2 mt-4">
           {[
-            { icon: IconDeposit,  label: "Deposit",  color: "text-up",      action: () => router.push("/deposit") },
+            { icon: IconDeposit,  label: "Deposit",  color: "text-up",      action: () => router.push("/") },
             { icon: IconWithdraw, label: "Withdraw", color: "text-down",    action: () => router.push("/withdraw") },
             { icon: IconTransfer, label: "Transfer", color: "text-primary", action: () => setInternalOpen(true) },
             { icon: IconSend,     label: "Send",     color: "text-gold",    action: () => setP2pOpen(true) },
@@ -290,40 +290,6 @@ export default function WalletPage() {
             </button>
           ))}
         </div>
-      </div>
-
-      {/* Sub-wallet summary row — Binance-style */}
-      <div className="mx-4 mt-3 grid grid-cols-3 gap-2">
-        {[
-          { label: "Funding",  value: `KSh ${parseFloat(kesBalance).toLocaleString("en-KE", { maximumFractionDigits: 0 })}`, color: "#00E5B4", href: "/deposit" },
-          { label: "Trading",  value: `${parseFloat(usdtBalance).toFixed(2)} USDT`, color: "#F0B429", href: "/trade" },
-          { label: "Earn",     value: "0.00 USDT", color: "#4A90E2", href: "/earn" },
-        ].map(({ label, value, color, href }) => (
-          <button key={label} onClick={() => router.push(href)}
-            className="flex flex-col gap-1 p-3 rounded-xl border border-border bg-bg-surface active:bg-bg-surface2"
-            style={{ borderLeftColor: color, borderLeftWidth: 3 }}>
-            <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">{label}</p>
-            <p className="font-price text-xs font-semibold text-text-primary truncate">
-              {hidden ? "••••" : value}
-            </p>
-          </button>
-        ))}
-      </div>
-
-      {/* Quick links */}
-      <div className="mx-4 mt-3 flex gap-2">
-        {[
-          { label: "History",     href: "/analysis?tab=history",  icon: "📋" },
-          { label: "Alerts",      href: "/alerts",                icon: "🔔" },
-          { label: "Auto-Invest", href: "/auto-invest",           icon: "📅" },
-          { label: "Loans",       href: "/loans",                 icon: "🏦" },
-        ].map(({ label, href, icon }) => (
-          <button key={label} onClick={() => router.push(href)}
-            className="flex-1 flex flex-col items-center gap-1 py-2.5 rounded-xl bg-bg-surface2 border border-border active:scale-95 transition-transform">
-            <span className="text-sm">{icon}</span>
-            <span className="font-outfit text-[9px] text-text-muted">{label}</span>
-          </button>
-        ))}
       </div>
 
       {/* Asset list */}
@@ -349,7 +315,7 @@ export default function WalletPage() {
         ) : assets.length === 0 ? (
           <div className="py-12 text-center">
             <p className="font-outfit text-text-muted text-sm">No assets yet</p>
-            <button onClick={() => router.push("/deposit")} className="text-primary font-outfit text-sm mt-2">Make a deposit</button>
+            <button onClick={() => router.push("/")} className="text-primary font-outfit text-sm mt-2">Make a deposit</button>
           </div>
         ) : (
           assets.map(({ symbol, amount, usdValue, change }) => {

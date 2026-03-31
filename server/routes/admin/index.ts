@@ -3,12 +3,6 @@ import { adminMiddleware } from "@/server/middleware/auth";
 import { getDb } from "@/server/db/client";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { redis, CacheKeys } from "@/lib/redis/client";
-import { getBalance, upsertBalance, createLedgerEntry } from "@/server/db/balances";
-import { add } from "@/lib/utils/money";
-import { Notifications } from "@/server/services/notifications";
-import { getBnbBalance, getTokenBalance, TOKENS, CHAINS, ACTIVE_DEPOSIT_CHAIN_IDS, getContractInfo, verifyTransaction } from "@/server/services/blockchain";
-import { invalidateKeyCache } from "@/server/services/exchange";
 
 const admin = new Hono();
 
@@ -115,7 +109,7 @@ admin.post(
     }
 
     // Verify tx on-chain
-    
+    const { verifyTransaction } = await import("@/server/services/blockchain");
     const verification = await verifyTransaction(txHash);
 
     if (!verification.success) {
@@ -130,10 +124,10 @@ admin.post(
     await db.from("trades").update({ status: "completed", tx_hash: txHash }).eq("id", id);
 
     // Credit user trading balance
-    
+    const { getBalance, upsertBalance, createLedgerEntry } = await import("@/server/db/balances");
     if (trade.amount_out) {
       const balance = await getBalance(trade.uid, trade.token_out, "trading");
-      
+      const { add } = await import("@/lib/utils/money");
       await upsertBalance(trade.uid, trade.token_out, add(balance, trade.amount_out), "trading");
       await createLedgerEntry({
         uid: trade.uid,
@@ -146,7 +140,7 @@ admin.post(
     }
 
     // Notify user
-    
+    const { Notifications } = await import("@/server/services/notifications");
     const tokenSymbol = trade.token_out.replace(/0x[0-9a-fA-F]{40}/i, "TOKEN");
     await Notifications.orderFilled(trade.uid, tokenSymbol, trade.side, trade.amount_in, trade.id);
 
@@ -229,8 +223,8 @@ admin.patch(
     const adminUser = c.get("user");
     const db = getDb();
 
-    
-    
+    const { getBalance, upsertBalance, createLedgerEntry } = await import("@/server/db/balances");
+    const { add } = await import("@/lib/utils/money");
 
     const current = await getBalance(uid, asset, "funding");
     const newBalance = add(current, amount);
@@ -282,7 +276,7 @@ admin.get("/transactions", async (c) => {
 /* ─── GET /system/health ────────────────────────────────────────────────── */
 
 admin.get("/system/health", async (c) => {
-  
+  const { redis } = await import("@/lib/redis/client");
 
   const checks = await Promise.allSettled([
     // DB check
@@ -324,7 +318,7 @@ admin.get("/system/health", async (c) => {
   const hotWalletAddress = process.env.HOT_WALLET_ADDRESS;
   let hotWalletStatus = null;
   if (hotWalletAddress) {
-    
+    const { getBnbBalance, getTokenBalance, TOKENS } = await import("@/server/services/blockchain");
     const [bnb, usdt] = await Promise.all([
       getBnbBalance(hotWalletAddress).catch(() => "0"),
       getTokenBalance(hotWalletAddress, TOKENS.USDT).catch(() => "0"),
@@ -552,7 +546,7 @@ admin.patch(
       )
     );
 
-    
+    const { redis, CacheKeys } = await import("@/lib/redis/client");
     await redis.del(CacheKeys.systemConfig());
 
     return c.json({ success: true, data: { updated: Object.keys(updates) } });
@@ -569,7 +563,7 @@ admin.patch(
 /* ─── GET /chains — list all registered chains ───────────────────────────── */
 
 admin.get("/chains", async (c) => {
-  
+  const { CHAINS, ACTIVE_DEPOSIT_CHAIN_IDS } = await import("@/server/services/blockchain");
   const db = getDb();
 
   // Load any admin-added chains from DB
@@ -635,7 +629,7 @@ admin.post(
       : [];
 
     // Check for duplicate chain ID
-    
+    const { CHAINS } = await import("@/server/services/blockchain");
     if (CHAINS[newChain.id]) {
       return c.json({
         success: false,
@@ -682,7 +676,7 @@ admin.patch(
     const db = getDb();
 
     // Hardcoded chains: store override in active_chain_overrides
-    
+    const { CHAINS, ACTIVE_DEPOSIT_CHAIN_IDS } = await import("@/server/services/blockchain");
     if (CHAINS[chainId]) {
       const { data: overridesRow } = await db
         .from("system_config")
@@ -740,7 +734,7 @@ admin.delete("/chains/:id", async (c) => {
   const chainId = parseInt(c.req.param("id"));
   const db = getDb();
 
-  
+  const { CHAINS } = await import("@/server/services/blockchain");
   if (CHAINS[chainId]) {
     return c.json({
       success: false,
@@ -826,7 +820,7 @@ admin.post(
     let autoDecimals = body.decimals;
 
     try {
-      
+      const { getContractInfo } = await import("@/server/services/blockchain");
       const info = await getContractInfo(body.address, body.chainIds[0] ?? 56);
       if (info) {
         autoName = body.name || info.name;
@@ -934,7 +928,7 @@ admin.post("/coins/:address/verify", async (c) => {
   const chainId = parseInt(c.req.query("chainId") ?? "56");
 
   try {
-    
+    const { getContractInfo } = await import("@/server/services/blockchain");
     const info = await getContractInfo(address, chainId);
 
     if (!info) {
@@ -1231,7 +1225,7 @@ admin.post(
     if (!entry) return c.json({ success: false, error: "Withdrawal not found or not pending approval", statusCode: 404 }, 404);
 
     // Refund user
-    
+    const { getBalance, upsertBalance, createLedgerEntry } = await import("@/server/db/balances");
     const current = await getBalance(entry.uid, entry.asset_symbol, "funding");
     const refundTotal = (
       parseFloat(entry.gross_amount) + parseFloat(entry.fee_amount)
@@ -1262,7 +1256,7 @@ admin.post(
     });
 
     // Notify user
-    
+    const { Notifications } = await import("@/server/services/notifications");
     await Notifications.send(entry.uid, {
       type: "security_alert",
       title: "Withdrawal rejected",
@@ -1307,83 +1301,5 @@ admin.patch(
     return c.json({ success: true });
   }
 );
-
-/* ─── GET /exchange-keys ─────────────────────────────────────────────────── */
-
-admin.get("/exchange-keys", async (c) => {
-  const db = getDb();
-  const { data } = await db
-    .from("exchange_keys")
-    .select("id,exchange,label,is_active,is_testnet,priority,last_used_at,error_count,created_at")
-    .order("priority", { ascending: true });
-  return c.json({ success: true, data: data ?? [] });
-});
-
-/* ─── POST /exchange-keys — add a new key ───────────────────────────────── */
-
-admin.post(
-  "/exchange-keys",
-  zValidator("json", z.object({
-    exchange:   z.enum(["okx", "binance", "bybit"]),
-    label:      z.string().max(80).default(""),
-    api_key:    z.string().min(8),
-    api_secret: z.string().min(8),
-    passphrase: z.string().optional(),
-    is_active:  z.boolean().default(true),
-    is_testnet: z.boolean().default(false),
-    priority:   z.number().int().min(1).max(10).default(1),
-  })),
-  async (c) => {
-    const body = c.req.valid("json");
-    const db = getDb();
-    const { data, error } = await db.from("exchange_keys").insert(body).select().single();
-    if (error) return c.json({ success: false, error: error.message }, 400);
-    // Invalidate key cache so new key takes effect immediately
-    
-    await invalidateKeyCache();
-    return c.json({ success: true, data });
-  }
-);
-
-/* ─── PATCH /exchange-keys/:id — update a key (e.g. hot-swap secrets) ───── */
-
-admin.patch(
-  "/exchange-keys/:id",
-  zValidator("json", z.object({
-    label:      z.string().max(80).optional(),
-    api_key:    z.string().min(8).optional(),
-    api_secret: z.string().min(8).optional(),
-    passphrase: z.string().optional(),
-    is_active:  z.boolean().optional(),
-    is_testnet: z.boolean().optional(),
-    priority:   z.number().int().min(1).max(10).optional(),
-  })),
-  async (c) => {
-    const { id } = c.req.param();
-    const body   = c.req.valid("json");
-    const db     = getDb();
-    const { data, error } = await db
-      .from("exchange_keys")
-      .update({ ...body, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select()
-      .single();
-    if (error) return c.json({ success: false, error: error.message }, 400);
-    
-    await invalidateKeyCache();
-    return c.json({ success: true, data });
-  }
-);
-
-/* ─── DELETE /exchange-keys/:id ─────────────────────────────────────────── */
-
-admin.delete("/exchange-keys/:id", async (c) => {
-  const { id } = c.req.param();
-  const db = getDb();
-  await db.from("exchange_keys").delete().eq("id", id);
-  
-  await invalidateKeyCache();
-  return c.json({ success: true });
-});
 
 export default admin;

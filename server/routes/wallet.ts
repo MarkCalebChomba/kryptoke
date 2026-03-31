@@ -7,12 +7,10 @@ import { findUserByUid } from "@/server/db/users";
 import { getAllBalances, getBalance, upsertBalance, createLedgerEntry } from "@/server/db/balances";
 import { getDb } from "@/server/db/client";
 import { getExchangeRate } from "@/server/services/forex";
-import { getBnbBalance, getDepositNetworks } from "@/server/services/blockchain";
-import { isMemoChain, getMemoForUser, deriveNonEvmAddress } from "@/server/services/nonEvm";
+import { getBnbBalance } from "@/server/services/blockchain";
 import { validateAmount, subtract, add } from "@/lib/utils/money";
 import type { WalletInfo, Balance } from "@/types";
 import bcrypt from "bcryptjs";
-import { redis } from "@/lib/redis/client";
 
 const wallet = new Hono();
 
@@ -24,13 +22,14 @@ wallet.use("*", withApiRateLimit());
 wallet.get("/info", async (c) => {
   const { uid } = c.get("user");
 
+  // Cache the full wallet info response for 5s — this is called on every page load
+  const { redis } = await import("@/lib/redis/client");
   const cacheKey = `wallet:info:${uid}`;
   const cached = await redis.get<Record<string, unknown>>(cacheKey).catch(() => null);
   if (cached) {
     return c.json({ success: true, data: cached });
   }
 
-  // Run DB queries and forex in parallel — forex now returns instantly from memory/stale
   const [userRow, balanceRows, rate] = await Promise.all([
     findUserByUid(uid),
     getAllBalances(uid),
@@ -41,21 +40,25 @@ wallet.get("/info", async (c) => {
     return c.json({ success: false, error: "User not found", statusCode: 404 }, 404);
   }
 
-  // BNB balance: serve from cache or "0" — NEVER block the response on an RPC call.
-  // Background refresh happens asynchronously after we respond.
+  // BNB balance cached 60s — RPC call is slow, not critical to be real-time
   const bnbCacheKey = `bnb:balance:${userRow.deposit_address}`;
   const cachedBnb = await redis.get<string>(bnbCacheKey).catch(() => null);
-  const bnbBalance = cachedBnb ?? "0";
+  const bnbBalance = cachedBnb != null
+    ? String(cachedBnb)
+    : await getBnbBalance(userRow.deposit_address)
+        .then(async (bal) => {
+          await redis.set(bnbCacheKey, bal, { ex: 60 }).catch(() => undefined);
+          return bal;
+        })
+        .catch(() => "0");
 
-  // Fire-and-forget BNB refresh if cache is empty
-  if (!cachedBnb) {
-    getBnbBalance(userRow.deposit_address)
-      .then((bal) => redis.set(bnbCacheKey, bal, { ex: 5 * 60 }).catch(() => undefined))
-      .catch(() => undefined);
-  }
+  const kesBalance = balanceRows.find(
+    (b) => b.asset === "KES" && b.account === "funding"
+  )?.amount ?? "0";
 
-  const kesBalance  = balanceRows.find((b) => b.asset === "KES"  && b.account === "funding")?.amount ?? "0";
-  const usdtBalance = balanceRows.find((b) => b.asset === "USDT" && b.account === "funding")?.amount ?? "0";
+  const usdtBalance = balanceRows.find(
+    (b) => b.asset === "USDT" && b.account === "funding"
+  )?.amount ?? "0";
 
   const info: WalletInfo = {
     depositAddress: userRow.deposit_address,
@@ -66,8 +69,8 @@ wallet.get("/info", async (c) => {
   };
 
   const response = { ...info, rate };
-  // Cache 10s — short enough to stay fresh, long enough to absorb repeated page loads
-  await redis.set(cacheKey, response, { ex: 10 }).catch(() => undefined);
+  // Cache for 5s — invalidated on deposit/withdrawal
+  await redis.set(cacheKey, response, { ex: 5 }).catch(() => undefined);
 
   return c.json({ success: true, data: response });
 });
@@ -267,7 +270,7 @@ export default wallet;
 
 wallet.get("/deposit/networks/:asset", async (c) => {
   const { asset } = c.req.param();
-  
+  const { getDepositNetworks } = await import("@/server/services/blockchain");
   const networks = getDepositNetworks(asset.toUpperCase());
   return c.json({ success: true, data: networks });
 });
@@ -313,7 +316,7 @@ wallet.get("/deposit/address/:chain", authMiddleware, withApiRateLimit(), async 
   }
 
   // ── Non-EVM chains ────────────────────────────────────────────────────────
-  
+  const { isMemoChain, getMemoForUser, deriveNonEvmAddress } = await import("@/server/services/nonEvm");
   type NonEvmChainId = import("@/server/services/nonEvm").NonEvmChainId;
   const validNonEvmChains: NonEvmChainId[] = ["TRON","BTC","LTC","DOGE","BCH","SOL","XRP","TON","XLM","NEAR","FIL"];
 

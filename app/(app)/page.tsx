@@ -1,72 +1,200 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { HomeTopBar } from "@/components/home/HomeTopBar";
 import { PortfolioCard } from "@/components/home/PortfolioCard";
-import { MarketList } from "@/components/home/MarketList";
+import { EventsCalendar } from "@/components/home/EventsCalendar";
 import { NotificationsSheet } from "@/components/home/NotificationsSheet";
 import { MenuSheet } from "@/components/home/MenuSheet";
 import { DepositSheet } from "@/components/home/DepositSheet";
 import { useWallet } from "@/lib/hooks/useWallet";
-import { useMarketOverview, useBinanceWebSocket, useFearGreed } from "@/lib/hooks/useMarketData";
+import { useHomeData } from "@/lib/hooks/useMarketData";
 import { useNotifications } from "@/lib/hooks/useNotifications";
-import { usePreferences, usePrices } from "@/lib/store";
+import { usePreferences } from "@/lib/store";
+import { formatPrice, formatChange, priceDirection } from "@/lib/utils/formatters";
 import { cn } from "@/lib/utils/cn";
-import { formatChange, priceDirection } from "@/lib/utils/formatters";
 
-// Compact inline Fear & Greed — no separate component import needed for speed
-function CompactFearGreed() {
-  const { data, isLoading } = useFearGreed();
-  if (isLoading || !data) return null;
-  const v = data.value;
-  const color = v <= 20 ? "#FF4560" : v <= 40 ? "#FF8C42" : v <= 60 ? "#F0B429" : v <= 80 ? "#7EC850" : "#00D68F";
-  const label = v <= 20 ? "Extreme Fear" : v <= 40 ? "Fear" : v <= 60 ? "Neutral" : v <= 80 ? "Greed" : "Extreme Greed";
+// ── Hardcoded fallback coins shown until Redis is seeded ──────────────────────
+const FALLBACK_SYMBOLS = ["BTC", "ETH", "BNB", "SOL", "XRP"];
+const FALLBACK_META: Record<string, { name: string; logo: string }> = {
+  BTC: { name: "Bitcoin",  logo: "https://assets.coingecko.com/coins/images/1/thumb/bitcoin.png" },
+  ETH: { name: "Ethereum", logo: "https://assets.coingecko.com/coins/images/279/thumb/ethereum.png" },
+  BNB: { name: "BNB",      logo: "https://assets.coingecko.com/coins/images/825/thumb/bnb-icon2_2x.png" },
+  SOL: { name: "Solana",   logo: "https://assets.coingecko.com/coins/images/4128/thumb/solana.png" },
+  XRP: { name: "XRP",      logo: "https://assets.coingecko.com/coins/images/44/thumb/xrp-symbol-white-128.png" },
+};
+
+// ── Mini coin tile ─────────────────────────────────────────────────────────────
+function CoinTile({ symbol, name, logo_url, price, change_24h, onClick }: {
+  symbol: string; name: string; logo_url: string;
+  price: string; change_24h: string; onClick: () => void;
+}) {
+  const dir = priceDirection(change_24h);
+  const isPos = dir === "up";
+  const isNeg = dir === "down";
+
   return (
-    <div className="mx-4 mt-2 card py-2.5 px-3 flex items-center gap-3" style={{ borderColor: color + "30" }}>
-      <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-        style={{ background: color + "18", border: `1px solid ${color}40` }}>
-        <span className="font-price text-sm font-bold" style={{ color }}>{v}</span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-outfit text-[10px] text-text-muted leading-none mb-1">Fear &amp; Greed Index</p>
-        <div className="relative h-1.5 rounded-full overflow-hidden"
-          style={{ background: "linear-gradient(to right,#FF4560 0%,#FF8C42 25%,#F0B429 50%,#7EC850 75%,#00D68F 100%)" }}>
-          <div className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border border-bg transition-all duration-700"
-            style={{ left: `calc(${v}% - 5px)`, backgroundColor: color }} />
+    <button
+      onClick={onClick}
+      className="flex-shrink-0 w-[120px] rounded-2xl border border-border bg-bg-surface2 p-3 text-left active:scale-95 transition-transform"
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-7 h-7 rounded-full bg-bg-surface overflow-hidden flex items-center justify-center flex-shrink-0 border border-border">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={logo_url} alt={symbol} className="w-full h-full object-cover"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        </div>
+        <div className="min-w-0">
+          <p className="font-outfit font-bold text-xs text-text-primary truncate">{symbol}</p>
+          <p className="font-outfit text-[9px] text-text-muted truncate">{name}</p>
         </div>
       </div>
-      <span className="font-syne font-bold text-xs flex-shrink-0" style={{ color }}>{label}</span>
+      <p className="font-price text-sm font-semibold text-text-primary tabular-nums">
+        {formatPrice(price)}
+      </p>
+      <span className={cn(
+        "inline-block text-[10px] font-price font-semibold mt-1 px-1.5 py-0.5 rounded-md tabular-nums",
+        isPos ? "bg-up/15 text-up" : isNeg ? "bg-down/15 text-down" : "bg-bg-surface text-text-muted"
+      )}>
+        {formatChange(change_24h)}
+      </span>
+    </button>
+  );
+}
+
+// ── Inline semicircle Fear & Greed ────────────────────────────────────────────
+function FearGreedSemi({ value, label, color }: { value: number; label: string; color: string }) {
+  const W = 140, H = 80, cx = W / 2, cy = H - 4;
+  const R = 58, r = 40;
+
+  const toPoint = (v: number, radius: number) => {
+    const angle = Math.PI - (v / 100) * Math.PI;
+    return { x: cx + radius * Math.cos(angle), y: cy - radius * Math.sin(angle) };
+  };
+
+  const needle = toPoint(value, (R + r) / 2);
+  const endOuter = toPoint(value, R);
+  const endInner = toPoint(value, r);
+  const largeArc = value > 50 ? 1 : 0;
+
+  const filledPath = value <= 0
+    ? ""
+    : value >= 100
+    ? `M ${cx - R} ${cy} A ${R} ${R} 0 1 1 ${cx + R} ${cy} L ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy} Z`
+    : `M ${cx - R} ${cy} A ${R} ${R} 0 ${largeArc} 1 ${endOuter.x.toFixed(2)} ${endOuter.y.toFixed(2)} L ${endInner.x.toFixed(2)} ${endInner.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 0 ${cx - r} ${cy} Z`;
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="overflow-visible">
+        <defs>
+          <linearGradient id="sgGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%"   stopColor="#FF4560" />
+            <stop offset="25%"  stopColor="#FF8C42" />
+            <stop offset="50%"  stopColor="#F0B429" />
+            <stop offset="75%"  stopColor="#7EC850" />
+            <stop offset="100%" stopColor="#00D68F" />
+          </linearGradient>
+        </defs>
+        {/* Track bg */}
+        <path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+          fill="none" stroke="#1C2840" strokeWidth={R - r} strokeLinecap="butt" />
+        {/* Faint gradient */}
+        <path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`}
+          fill="none" stroke="url(#sgGrad)" strokeWidth={R - r} strokeLinecap="butt" opacity="0.25" />
+        {/* Filled arc */}
+        {filledPath && <path d={filledPath} fill={color} opacity="0.9" />}
+        {/* Needle dot */}
+        <circle cx={needle.x} cy={needle.y} r="5" fill={color} stroke="#0A0F1E" strokeWidth="2"
+          style={{ filter: `drop-shadow(0 0 5px ${color}90)` }} />
+        {/* Value number */}
+        <text x={cx} y={cy - 6} textAnchor="middle" fill={color}
+          fontSize="22" fontFamily="var(--font-dm-mono), monospace" fontWeight="700">
+          {value}
+        </text>
+        {/* Labels */}
+        <text x={cx - R + 2} y={cy + 12} fill="#4A5B7A" fontSize="8" fontFamily="var(--font-outfit), sans-serif">Fear</text>
+        <text x={cx + R - 2} y={cy + 12} fill="#4A5B7A" fontSize="8" fontFamily="var(--font-outfit), sans-serif" textAnchor="end">Greed</text>
+      </svg>
+      <span className="font-outfit text-[11px] font-semibold -mt-1" style={{ color }}>{label}</span>
     </div>
   );
 }
 
+// ── Quick actions — icon-first compact design ─────────────────────────────────
+function QuickAction({ icon, label, color, bg, onClick }: {
+  icon: React.ReactNode; label: string; color: string; bg: string; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick}
+      className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform">
+      <div className={cn("w-11 h-11 rounded-2xl flex items-center justify-center", bg)}>
+        {icon}
+      </div>
+      <span className={cn("font-outfit text-[11px] font-semibold", color)}>{label}</span>
+    </button>
+  );
+}
+
+// ── Home page ─────────────────────────────────────────────────────────────────
 export default function HomePage() {
   const router = useRouter();
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [menuOpen,  setMenuOpen]  = useState(false);
+  const [notifOpen,   setNotifOpen]   = useState(false);
+  const [menuOpen,    setMenuOpen]    = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
 
-  useBinanceWebSocket();
   useNotifications();
 
   const { totalKes, totalUsd, isLoading: walletLoading } = useWallet();
-  const { data: marketData, isLoading: marketLoading } = useMarketOverview();
+  const { data: homeData, isLoading: homeLoading } = useHomeData();
   const { isFavorite } = usePreferences();
-  const { prices, priceChanges } = usePrices();
 
-  // Quick-access ticker strip — favorites first, then major coins
-  const MAJOR = ["BTC","ETH","BNB","SOL","XRP","DOGE","ADA","AVAX","DOT","LINK","UNI","MATIC"];
-  const favoriteCoins = (marketData ?? []).filter(t => isFavorite(t.address)).slice(0, 4);
-  const stripCoins = favoriteCoins.length > 0 ? favoriteCoins : (marketData ?? [])
-    .filter(t => MAJOR.includes(t.symbol)).slice(0, 6);
+  const serverCoins = homeData?.homeCoins ?? [];
+  const fearGreed   = homeData?.fearGreed ?? null;
+  const fgHistory   = homeData?.fgHistory ?? [];
+  const overview    = homeData?.overview  ?? null;
+
+  // Live prices from Binance for fallback coins
+  const [liveData, setLiveData] = useState<Record<string, { price: string; change: string }>>({});
+  useEffect(() => {
+    fetch("https://api.binance.com/api/v3/ticker/24hr")
+      .then((r) => r.json())
+      .then((data: Array<{ symbol: string; lastPrice: string; priceChangePercent: string }>) => {
+        const map: Record<string, { price: string; change: string }> = {};
+        for (const t of data) {
+          if (FALLBACK_SYMBOLS.map(s => `${s}USDT`).includes(t.symbol)) {
+            map[t.symbol.replace("USDT", "")] = { price: t.lastPrice, change: t.priceChangePercent };
+          }
+        }
+        setLiveData(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Build display coins — server coins if available, otherwise Binance fallback
+  const displayCoins = serverCoins.length > 0
+    ? serverCoins
+    : FALLBACK_SYMBOLS.map((sym) => ({
+        symbol:     sym,
+        name:       FALLBACK_META[sym]!.name,
+        logo_url:   FALLBACK_META[sym]!.logo,
+        price:      liveData[sym]?.price ?? "0",
+        change_24h: liveData[sym]?.change ?? "0",
+      }));
+
+  // F&G color
+  const fgColor = !fearGreed ? "#F0B429"
+    : fearGreed.value <= 20 ? "#FF4560"
+    : fearGreed.value <= 40 ? "#FF8C42"
+    : fearGreed.value <= 60 ? "#F0B429"
+    : fearGreed.value <= 80 ? "#7EC850"
+    : "#00D68F";
 
   return (
     <div className="screen">
       <HomeTopBar onBellClick={() => setNotifOpen(true)} onMenuClick={() => setMenuOpen(true)} />
 
-      <div className="h-2" />
-
+      {/* Portfolio card */}
       <PortfolioCard
         totalKes={totalKes}
         totalUsd={totalUsd}
@@ -75,105 +203,115 @@ export default function HomePage() {
         onWithdraw={() => router.push("/withdraw")}
       />
 
-      {/* Quick action buttons */}
-      <div className="mx-4 mt-2.5 grid grid-cols-3 gap-2">
-        {[
-          { label: "Deposit",  icon: "↓", color: "text-up",      bg: "bg-up/10 border-up/20",          action: () => setDepositOpen(true) },
-          { label: "Withdraw", icon: "↑", color: "text-down",    bg: "bg-down/10 border-down/20",       action: () => router.push("/withdraw") },
-          { label: "Transfer", icon: "⇄", color: "text-primary", bg: "bg-primary/10 border-primary/20", action: () => router.push("/assets") },
-        ].map(({ label, icon, color, bg, action }) => (
-          <button key={label} onClick={action}
-            className={`flex flex-col items-center gap-0.5 py-2.5 rounded-xl border ${bg} active:scale-95 transition-transform`}>
-            <span className={`text-base leading-none ${color}`}>{icon}</span>
-            <span className={`font-outfit text-[11px] font-semibold ${color}`}>{label}</span>
-          </button>
-        ))}
+      {/* Quick actions + Fear & Greed in one row */}
+      <div className="mx-4 mt-4 flex items-center justify-between">
+        {/* Left: 3 icon actions */}
+        <div className="flex items-center gap-5">
+          <QuickAction
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 4v16M4 12h16" stroke="#00D68F" strokeWidth="2.5" strokeLinecap="round"/>
+              </svg>
+            }
+            label="Deposit" color="text-up" bg="bg-up/10"
+            onClick={() => setDepositOpen(true)}
+          />
+          <QuickAction
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 20V4M4 12l8-8 8 8" stroke="#FF4560" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            }
+            label="Withdraw" color="text-down" bg="bg-down/10"
+            onClick={() => router.push("/withdraw")}
+          />
+          <QuickAction
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M7 16l-4-4 4-4M17 8l4 4-4 4M14 4l-4 16" stroke="#00B4FF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            }
+            label="Transfer" color="text-primary" bg="bg-primary/10"
+            onClick={() => router.push("/assets")}
+          />
+        </div>
+
+        {/* Right: Fear & Greed semicircle */}
+        <div className="flex flex-col items-center">
+          <p className="font-outfit text-[9px] text-text-muted mb-0.5 uppercase tracking-wide">Fear &amp; Greed</p>
+          {fearGreed ? (
+            <FearGreedSemi value={fearGreed.value} label={fearGreed.classification} color={fgColor} />
+          ) : (
+            <div className="w-[140px] h-[95px] skeleton rounded-xl" />
+          )}
+        </div>
       </div>
 
-      {/* Fear & Greed — right below deposit buttons */}
-      <CompactFearGreed />
-
-      {/* Ticker strip — major coins or favorites */}
-      {stripCoins.length > 0 && (
-        <div className="mx-4 mt-2.5 flex gap-2 overflow-x-auto no-scrollbar">
-          {stripCoins.map((coin) => {
-            const tickerKey = `${coin.symbol}USDT`;
-            const livePrice  = prices[tickerKey]       ?? coin.price;
-            const liveChange = priceChanges[tickerKey] ?? "0";
-            const dir = priceDirection(liveChange);
-            return (
-              <button key={coin.address}
-                onClick={() => router.push(`/markets/${coin.symbol}`)}
-                className="flex-shrink-0 px-3 py-2 rounded-xl border border-border bg-bg-surface2 text-left min-w-[76px]">
-                <div className="flex items-center gap-1 mb-0.5">
-                  {coin.iconUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={coin.iconUrl} alt={coin.symbol} className="w-3.5 h-3.5 rounded-full" />
-                  )}
-                  <span className="font-outfit font-bold text-[10px] text-text-primary">{coin.symbol}</span>
-                </div>
-                <p className="font-price text-xs text-text-primary tabular-nums">
-                  ${parseFloat(livePrice) > 0
-                    ? parseFloat(livePrice) < 1
-                      ? parseFloat(livePrice).toFixed(5)
-                      : parseFloat(livePrice).toLocaleString(undefined, { maximumFractionDigits: 2 })
-                    : "—"}
-                </p>
-                <span className={cn(
-                  "font-price text-[9px] font-semibold",
-                  dir === "up" ? "text-up" : dir === "down" ? "text-down" : "text-text-muted"
-                )}>
-                  {formatChange(liveChange)}
-                </span>
-              </button>
-            );
-          })}
+      {/* Market overview strip */}
+      {overview && (
+        <div className="mx-4 mt-3 px-3 py-2 rounded-xl bg-bg-surface2 border border-border flex items-center justify-between">
+          <div>
+            <p className="font-outfit text-[10px] text-text-muted">24h Market Volume</p>
+            <p className="font-price text-sm font-semibold text-text-primary">
+              ${(parseFloat(overview.totalVolume24h) / 1e9).toFixed(1)}B
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="font-outfit text-[10px] text-text-muted">BTC Price</p>
+            <p className="font-price text-sm font-semibold text-text-primary">
+              {liveData["BTC"] ? formatPrice(liveData["BTC"].price) : "—"}
+            </p>
+          </div>
         </div>
       )}
 
-      <div className="h-3" />
+      <div className="h-5" />
 
-      {/* Quick nav shortcuts — Binance-style feature cards */}
-      <div className="px-4 mb-3">
-        <div className="grid grid-cols-4 gap-2">
-          {[
-            { label: "Buy Crypto",  icon: "↓",  path: "/deposit",  color: "text-up",      bg: "bg-up/8" },
-            { label: "Convert",     icon: "⇄",  path: "/convert",  color: "text-primary", bg: "bg-primary/8" },
-            { label: "P2P",         icon: "🤝", path: "/p2p",      color: "text-gold",    bg: "bg-gold/8" },
-            { label: "Rewards",     icon: "🎁", path: "/rewards",  color: "text-primary", bg: "bg-primary/8" },
-          ].map(({ label, icon, path, color, bg }) => (
-            <button key={label} onClick={() => router.push(path)}
-              className={cn("flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-border/60 active:scale-95 transition-transform", bg)}>
-              <span className="text-base leading-none">{icon}</span>
-              <span className={cn("font-outfit text-[10px] font-semibold leading-tight text-center", color)}>{label}</span>
-            </button>
-          ))}
-        </div>
+      {/* Markets strip */}
+      <div className="mx-4 mb-2 flex items-center justify-between">
+        <h2 className="font-syne font-bold text-sm text-text-primary">Markets</h2>
+        <button onClick={() => router.push("/markets")}
+          className="font-outfit text-xs text-primary font-medium">See all →</button>
       </div>
 
-      {/* Market list — all coins with live prices and percentages */}
-      <MarketList
-        data={(marketData ?? []).map((t) => ({
-          symbol:  t.symbol,
-          name:    t.name,
-          price:   t.price,
-          change:  "0",
-          volume:  t.volume ?? "0",
-          iconUrl: t.iconUrl,
-          address: t.address,
-          isNew:   t.isNew,
-          isSeed:  t.isSeed,
-        }))}
-        isLoading={marketLoading}
-        onSeeAll={() => router.push("/markets")}
-        onCoinClick={(_address, symbol) => router.push(`/markets/${symbol}`)}
-      />
+      {homeLoading && serverCoins.length === 0 ? (
+        <div className="flex gap-2 px-4 overflow-x-auto no-scrollbar">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex-shrink-0 w-[120px] h-24 rounded-2xl skeleton" />
+          ))}
+        </div>
+      ) : (
+        <div className="flex gap-2 px-4 overflow-x-auto no-scrollbar pb-1">
+          {displayCoins.map((coin) => (
+            <CoinTile
+              key={coin.symbol}
+              symbol={coin.symbol}
+              name={coin.name}
+              logo_url={coin.logo_url}
+              price={coin.price}
+              change_24h={coin.change_24h}
+              onClick={() => router.push(`/markets/${coin.symbol}`)}
+            />
+          ))}
+          <button onClick={() => router.push("/markets")}
+            className="flex-shrink-0 w-[52px] rounded-2xl border border-dashed border-border flex flex-col items-center justify-center gap-1 text-text-muted active:bg-bg-surface2 transition-colors">
+            <span className="text-base leading-none">→</span>
+            <span className="font-outfit text-[9px]">All</span>
+          </button>
+        </div>
+      )}
 
-      <div className="h-8" />
+      <div className="h-5" />
 
-      <NotificationsSheet isOpen={notifOpen} onClose={() => setNotifOpen(false)} />
-      <MenuSheet isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
-      <DepositSheet isOpen={depositOpen} onClose={() => setDepositOpen(false)} />
+      {/* Events calendar */}
+      <EventsCalendar />
+
+      <div className="h-24" />
+
+      {/* Sheets */}
+      <NotificationsSheet open={notifOpen} onClose={() => setNotifOpen(false)} />
+      <MenuSheet open={menuOpen} onClose={() => setMenuOpen(false)} />
+      <DepositSheet open={depositOpen} onClose={() => setDepositOpen(false)} />
     </div>
   );
 }

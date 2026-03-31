@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { formatPrice, formatVolume, formatChange, priceDirection } from "@/lib/utils/formatters";
 import { usePrices, usePreferences } from "@/lib/store";
@@ -20,30 +19,6 @@ interface MarketRowProps {
   onClick: () => void;
 }
 
-// Inline TokenIcon — handles load errors gracefully with letter fallback
-function TokenIcon({ symbol, iconUrl }: { symbol: string; iconUrl: string | null }) {
-  const [failed, setFailed] = useState(false);
-
-  if (!iconUrl || failed) {
-    return (
-      <span className="font-price text-xs font-bold text-text-muted">
-        {symbol.slice(0, 2)}
-      </span>
-    );
-  }
-
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={iconUrl}
-      alt={symbol}
-      className="w-full h-full object-cover"
-      onError={() => setFailed(true)}
-      loading="lazy"
-    />
-  );
-}
-
 export function MarketRow({
   symbol, name, address, basePrice, baseChange,
   volume, iconUrl, isNew, isSeed, kesPerUsd, onClick,
@@ -52,10 +27,10 @@ export function MarketRow({
   const { isFavorite, toggleFavorite } = usePreferences();
 
   const tickerKey = `${symbol}USDT`;
-  const price  = prices[tickerKey]       ?? basePrice;
+  const price = prices[tickerKey] ?? basePrice;
   const change = priceChanges[tickerKey] ?? baseChange;
-  const dir    = priceDirection(change);
-  const fav    = isFavorite(address);
+  const dir = priceDirection(change);
+  const fav = isFavorite(address);
 
   const kesPrice = price !== "0"
     ? (parseFloat(price) * parseFloat(kesPerUsd)).toFixed(2)
@@ -68,10 +43,15 @@ export function MarketRow({
     >
       {/* Icon */}
       <div className="w-9 h-9 rounded-full bg-bg-surface2 border border-border flex-shrink-0 overflow-hidden flex items-center justify-center">
-        <TokenIcon symbol={symbol} iconUrl={iconUrl} />
+        {iconUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={iconUrl} alt={symbol} className="w-full h-full object-cover" />
+        ) : (
+          <span className="font-price text-xs text-text-muted">{symbol.slice(0, 2)}</span>
+        )}
       </div>
 
-      {/* Name + volume */}
+      {/* Name */}
       <div className="flex-1 text-left min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-outfit text-sm font-semibold text-text-primary">{symbol}</span>
@@ -84,7 +64,7 @@ export function MarketRow({
           )}
         </div>
         <p className="font-outfit text-[11px] text-text-muted">
-          {name} · Vol {formatVolume(volume)}
+          Vol {formatVolume(volume)}
         </p>
       </div>
 
@@ -100,29 +80,26 @@ export function MarketRow({
         )}
       </div>
 
-      {/* Change pill */}
+      {/* Change — luminous green/red pill */}
       <div className="w-[64px] text-right flex-shrink-0">
         <span className={cn(
           "inline-block font-price text-[11px] font-semibold px-2 py-1 rounded-lg",
-          dir === "up"   ? "bg-up/20   text-up   ring-1 ring-up/30"   :
-          dir === "down" ? "bg-down/20 text-down ring-1 ring-down/30" :
-                           "bg-bg-surface2 text-text-muted"
+          dir === "up"
+            ? "bg-up/20 text-up ring-1 ring-up/30"
+            : dir === "down"
+            ? "bg-down/20 text-down ring-1 ring-down/30"
+            : "bg-bg-surface2 text-text-muted"
         )}>
           {formatChange(change)}
         </span>
       </div>
 
-      {/* Favourite star */}
+      {/* Star — div to avoid nested button hydration error */}
       <div
         role="button"
         tabIndex={0}
         onClick={(e) => { e.stopPropagation(); toggleFavorite(address); }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.stopPropagation();
-            toggleFavorite(address);
-          }
-        }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); toggleFavorite(address); }}}
         className="tap-target flex-shrink-0 text-text-muted hover:text-gold transition-colors cursor-pointer"
         aria-label={fav ? "Remove from favorites" : "Add to favorites"}
       >

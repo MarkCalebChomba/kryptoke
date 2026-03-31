@@ -1,70 +1,46 @@
 "use client";
 
-import { useCoinGeckoData } from "@/lib/hooks/useTokenDetail";
+import { useCoinDetail } from "@/lib/hooks/useMarketData";
 import { useToastActions } from "@/components/shared/ToastContainer";
-import { formatPrice, formatTimeAgo, truncateAddress } from "@/lib/utils/formatters";
+import { formatPrice } from "@/lib/utils/formatters";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { IconCopy, IconExternalLink } from "@/components/icons";
 import Big from "big.js";
 
-interface StatRowProps {
-  label: string;
-  value: string | null;
-  isPrice?: boolean;
-  copyable?: boolean;
-}
+// ── Sub-components ────────────────────────────────────────────────────────────
 
-function StatRow({ label, value, isPrice, copyable }: StatRowProps) {
-  const toast = useToastActions();
-
+function StatRow({ label, value }: { label: string; value: string | null }) {
   if (!value) return null;
-
-  const display = isPrice ? formatPrice(value) : value;
-
   return (
     <div className="flex items-start justify-between py-3 border-b border-border/50">
       <span className="font-outfit text-sm text-text-muted">{label}</span>
-      <div className="flex items-center gap-2 max-w-[60%] text-right">
-        <span className="font-price text-sm text-text-primary break-all">{display}</span>
-        {copyable && (
-          <button
-            onClick={() => { navigator.clipboard.writeText(value); toast.copied(); }}
-            className="flex-shrink-0 text-text-muted hover:text-primary transition-colors"
-            aria-label="Copy"
-          >
-            <IconCopy size={12} />
-          </button>
-        )}
-      </div>
+      <span className="font-price text-sm text-text-primary text-right max-w-[60%] break-all">{value}</span>
     </div>
   );
 }
 
-function LinkRow({ label, url, icon }: { label: string; url: string | null; icon?: React.ReactNode }) {
+function LinkRow({ label, url }: { label: string; url: string | null }) {
   if (!url) return null;
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center justify-between py-3 border-b border-border/50 active:opacity-70"
-    >
-      <div className="flex items-center gap-2">
-        {icon}
-        <span className="font-outfit text-sm text-text-primary">{label}</span>
-      </div>
+    <a href={url} target="_blank" rel="noopener noreferrer"
+      className="flex items-center justify-between py-3 border-b border-border/50 active:opacity-70">
+      <span className="font-outfit text-sm text-text-primary">{label}</span>
       <IconExternalLink size={14} className="text-text-muted" />
     </a>
   );
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
+
 interface TokenInfoTabProps {
-  coingeckoId: string | null | undefined;
-  contractAddress: string;
+  symbol: string;
+  // Legacy props kept for backward compat — ignored, we use symbol now
+  coingeckoId?:      string | null;
+  contractAddress?:  string;
 }
 
-export function TokenInfoTab({ coingeckoId, contractAddress }: TokenInfoTabProps) {
-  const { data, isLoading } = useCoinGeckoData(coingeckoId);
+export function TokenInfoTab({ symbol }: TokenInfoTabProps) {
+  const { data, isLoading } = useCoinDetail(symbol);
   const toast = useToastActions();
 
   if (isLoading) {
@@ -74,7 +50,7 @@ export function TokenInfoTab({ coingeckoId, contractAddress }: TokenInfoTabProps
         <Skeleton height={14} className="w-5/6" />
         <Skeleton height={14} className="w-4/6" />
         <div className="pt-4 space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
+          {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="flex justify-between border-b border-border/50 pb-3">
               <Skeleton height={12} width={100} />
               <Skeleton height={12} width={120} />
@@ -85,84 +61,81 @@ export function TokenInfoTab({ coingeckoId, contractAddress }: TokenInfoTabProps
     );
   }
 
-  const formatLargeNum = (val: string | null | undefined) => {
-    if (!val) return null;
-    const n = new Big(val);
-    if (n.gte(1e9)) return `$${n.div(1e9).toFixed(2)}B`;
-    if (n.gte(1e6)) return `$${n.div(1e6).toFixed(2)}M`;
-    if (n.gte(1e3)) return `$${n.div(1e3).toFixed(2)}K`;
-    return `$${n.toFixed(2)}`;
+  if (!data) {
+    return (
+      <p className="text-text-muted font-outfit text-sm text-center py-12">
+        Token information not available
+      </p>
+    );
+  }
+
+  const fmt = (n: string | null | undefined) => {
+    if (!n || n === "0") return null;
+    try {
+      const b = new Big(n);
+      if (b.gte(1e9)) return `${b.div(1e9).toFixed(2)}B`;
+      if (b.gte(1e6)) return `${b.div(1e6).toFixed(2)}M`;
+      if (b.gte(1e3)) return `${b.div(1e3).toFixed(2)}K`;
+      return b.toFixed(2);
+    } catch {
+      return n;
+    }
   };
+
+  const fmtDate = (d: string | null | undefined) =>
+    d ? new Date(d).toLocaleDateString("en-KE", { year: "numeric", month: "short", day: "numeric" }) : null;
 
   return (
     <div className="px-4 py-4">
       {/* Description */}
-      {data?.description && (
-        <p className="font-outfit text-sm text-text-secondary leading-relaxed mb-4">
+      {data.description && (
+        <p className="font-outfit text-sm text-text-secondary leading-relaxed mb-5">
           {data.description}
         </p>
       )}
 
       {/* Market stats */}
-      <div className="mb-2">
-        <StatRow label="Market Cap" value={formatLargeNum(data?.marketCap)} />
-        <StatRow label="Circulating Supply" value={
-          data?.circulatingSupply
-            ? new Big(data.circulatingSupply).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-            : null
-        } />
-        <StatRow label="Total Supply" value={
-          data?.totalSupply
-            ? new Big(data.totalSupply).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-            : null
-        } />
-        <StatRow
-          label="All-Time High"
-          value={data?.allTimeHigh ? `${formatPrice(data.allTimeHigh)}${data.allTimeHighDate ? ` (${new Date(data.allTimeHighDate).toLocaleDateString()})` : ""}` : null}
-          isPrice={false}
-        />
-        <StatRow
-          label="All-Time Low"
-          value={data?.allTimeLow ? `${formatPrice(data.allTimeLow)}${data.allTimeLowDate ? ` (${new Date(data.allTimeLowDate).toLocaleDateString()})` : ""}` : null}
-          isPrice={false}
-        />
-      </div>
+      <p className="font-outfit text-xs text-text-muted uppercase tracking-wide mb-1">Market Data</p>
+      <StatRow label="CMC Rank"           value={data.cmc_rank ? `#${data.cmc_rank}` : null} />
+      <StatRow label="Circulating Supply" value={fmt(data.circulating_supply?.toString())} />
+      <StatRow label="Max Supply"         value={fmt(data.max_supply?.toString()) ?? "Unlimited"} />
+      <StatRow label="All-Time High"
+        value={data.ath
+          ? `${formatPrice(String(data.ath))}${data.ath_date ? `  ·  ${fmtDate(data.ath_date)}` : ""}`
+          : null}
+      />
+      <StatRow label="All-Time Low"
+        value={data.atl
+          ? `${formatPrice(String(data.atl))}${data.atl_date ? `  ·  ${fmtDate(data.atl_date)}` : ""}`
+          : null}
+      />
 
-      {/* Contract address */}
-      {contractAddress && contractAddress !== "BTCUSDT" && !contractAddress.endsWith("USDT") && (
-        <div className="py-3 border-b border-border/50">
-          <p className="font-outfit text-sm text-text-muted mb-1.5">Contract Address (BSC)</p>
-          <div className="flex items-center gap-2 bg-bg-surface2 border border-border rounded-xl px-3 py-2.5">
-            <span className="font-price text-xs text-text-primary flex-1 truncate">
-              {contractAddress}
-            </span>
-            <button
-              onClick={() => { navigator.clipboard.writeText(contractAddress); toast.copied(); }}
-              className="flex-shrink-0 text-text-muted hover:text-primary transition-colors"
-              aria-label="Copy contract address"
-            >
-              <IconCopy size={14} />
-            </button>
-          </div>
-        </div>
+      <div className="h-3" />
+
+      {/* Block explorers */}
+      {data.explorer_urls && data.explorer_urls.length > 0 && (
+        <>
+          <p className="font-outfit text-xs text-text-muted uppercase tracking-wide mb-1 mt-2">Block Explorers</p>
+          {data.explorer_urls.map((url) => {
+            let label = url;
+            try {
+              const host = new URL(url).hostname.replace("www.", "");
+              label = host;
+            } catch { /* keep raw */ }
+            return <LinkRow key={url} label={label} url={url} />;
+          })}
+        </>
       )}
 
-      {/* Links */}
-      {(data?.website || data?.twitter || data?.telegram || data?.whitepaper) && (
-        <div className="mt-2">
-          <p className="font-outfit text-xs text-text-muted uppercase tracking-wide mb-1">Official Links</p>
-          <LinkRow label="Website" url={data?.website ?? null} />
-          <LinkRow label="Whitepaper" url={data?.whitepaper ?? null} />
-          <LinkRow label="Twitter" url={data?.twitter ?? null} />
-          <LinkRow label="Telegram" url={data?.telegram ?? null} />
-        </div>
-      )}
+      <div className="h-3" />
 
-      {!data && !isLoading && (
-        <p className="text-text-muted font-outfit text-sm text-center py-8">
-          Token information not available
-        </p>
-      )}
+      {/* Official links */}
+      <p className="font-outfit text-xs text-text-muted uppercase tracking-wide mb-1 mt-2">Links</p>
+      <LinkRow label="Website"    url={data.website_url ?? null} />
+      <LinkRow label="Whitepaper" url={data.whitepaper_url ?? null} />
+      <LinkRow label="Twitter / X" url={data.twitter_url ?? null} />
+      <LinkRow label="Telegram"   url={data.telegram_url ?? null} />
+      <LinkRow label="Reddit"     url={data.reddit_url ?? null} />
     </div>
   );
 }

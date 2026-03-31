@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TopBar } from "@/components/shared/TopBar";
-import { BottomSheet } from "@/components/shared/BottomSheet";
+import { BottomSheet, ComingSoonSheet } from "@/components/shared/BottomSheet";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { apiGet, apiPost } from "@/lib/api/client";
 import { useToastActions } from "@/components/shared/ToastContainer";
@@ -22,12 +22,20 @@ function ProductCard({ product, onClick }: EarnProductCardProps) {
   return (
     <button
       onClick={onClick}
-      className="card text-left active:scale-[0.98] transition-transform"
+      className={cn(
+        "card text-left active:scale-[0.98] transition-transform",
+        product.isComingSoon && "opacity-60"
+      )}
     >
       <div className="flex items-start justify-between mb-2">
         <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
           <span className="font-price text-xs text-primary">{product.asset.slice(0, 1)}</span>
         </div>
+        {product.isComingSoon && (
+          <span className="text-[10px] font-outfit text-text-muted border border-border px-1.5 py-0.5 rounded">
+            Soon
+          </span>
+        )}
       </div>
       <p className="font-outfit text-sm font-semibold text-text-primary">{product.name}</p>
       <p className="font-price text-lg font-medium text-up mt-0.5">{formatApr(product.apr)}</p>
@@ -42,9 +50,9 @@ const EARN_PRODUCTS: EarnProduct[] = [
   { id: "1", asset: "USDT", name: "USDT Simple Earn", apr: "10", lockPeriodDays: null, minSubscription: "1", interestFrequency: "daily", isComingSoon: false },
   { id: "2", asset: "BTC",  name: "BTC Simple Earn",  apr: "2.5", lockPeriodDays: null, minSubscription: "0.001", interestFrequency: "daily", isComingSoon: false },
   { id: "3", asset: "USDT", name: "Flash Earn",        apr: "30",  lockPeriodDays: 7,    minSubscription: "100", interestFrequency: "weekly", isComingSoon: false },
-  { id: "4", asset: "BNB",  name: "On-chain Earn",     apr: "8.2", lockPeriodDays: null, minSubscription: "0.1", interestFrequency: "daily", isComingSoon: false },
-  { id: "5", asset: "USDT", name: "Dual Investment",   apr: "45",  lockPeriodDays: 7,    minSubscription: "10", interestFrequency: "weekly", isComingSoon: false },
-  { id: "6", asset: "USDT", name: "Crypto Loan",       apr: "0",   lockPeriodDays: null, minSubscription: "0", interestFrequency: "monthly", isComingSoon: false },
+  { id: "4", asset: "BNB",  name: "On-chain Earn",     apr: "8.2", lockPeriodDays: null, minSubscription: "0.1", interestFrequency: "daily", isComingSoon: true },
+  { id: "5", asset: "USDT", name: "Dual Investment",   apr: "45",  lockPeriodDays: 7,    minSubscription: "10", interestFrequency: "weekly", isComingSoon: true },
+  { id: "6", asset: "USDT", name: "Crypto Loan",       apr: "0",   lockPeriodDays: null, minSubscription: "0", interestFrequency: "monthly", isComingSoon: true },
 ];
 
 interface SubscribeSheetProps {
@@ -162,6 +170,10 @@ export default function EarnPage() {
   const router = useRouter();
   const [selectedProduct, setSelectedProduct] = useState<EarnProduct | null>(null);
   const [subscribeOpen, setSubscribeOpen] = useState(false);
+  const [comingSoon, setComingSoon] = useState<{ open: boolean; feature: string }>({
+    open: false, feature: "",
+  });
+
   const { data: positions } = useQuery({
     queryKey: ["earn", "positions"],
     queryFn: () => apiGet<EarnPosition[]>("/earn/positions"),
@@ -169,8 +181,8 @@ export default function EarnPage() {
   });
 
   function handleProductClick(product: EarnProduct) {
-    if (product.name === "Crypto Loan") {
-      router.push("/loans");
+    if (product.isComingSoon) {
+      setComingSoon({ open: true, feature: product.name });
       return;
     }
     setSelectedProduct(product);
@@ -222,8 +234,8 @@ export default function EarnPage() {
         {[
           { label: "Simple Earn", onClick: () => handleProductClick(EARN_PRODUCTS[0]!) },
           { label: "Flash Earn",  onClick: () => handleProductClick(EARN_PRODUCTS[2]!) },
-          { label: "On-chain",    onClick: () => handleProductClick(EARN_PRODUCTS[3]!) },
-          { label: "Crypto Loan", onClick: () => router.push("/loans") },
+          { label: "On-chain",    onClick: () => setComingSoon({ open: true, feature: "On-chain Earn" }) },
+          { label: "Referral",    onClick: () => setComingSoon({ open: true, feature: "Referral" }) },
         ].map(({ label, onClick }) => (
           <button key={label} onClick={onClick}
             className="flex-1 py-2.5 rounded-xl bg-bg-surface2 border border-border font-outfit text-[11px] text-text-muted active:scale-95 transition-transform">
@@ -270,7 +282,18 @@ export default function EarnPage() {
         isOpen={subscribeOpen}
         onClose={() => { setSubscribeOpen(false); setSelectedProduct(null); }}
       />
-
+      <ComingSoonSheet
+        isOpen={comingSoon.open}
+        onClose={() => setComingSoon({ open: false, feature: "" })}
+        featureName={comingSoon.feature}
+        description={
+          comingSoon.feature === "On-chain Earn"
+            ? "Stake ETH and earn native yields via WBETH. On-chain earn is coming to KryptoKe soon."
+            : comingSoon.feature === "Referral"
+            ? "Invite friends and earn 10% of their trading fees. Referral rewards launching soon."
+            : `${comingSoon.feature} is in development and launching soon.`
+        }
+      />
     </div>
   );
 }

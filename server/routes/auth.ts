@@ -5,7 +5,6 @@ import bcrypt from "bcryptjs";
 import { signJwt } from "@/server/services/jwt";
 import { sendEmailOtp, sendPhoneOtp, verifyOtp } from "@/server/services/otp";
 import { deriveDepositAddress } from "@/server/services/wallet";
-import { redis } from "@/lib/redis/client";
 import {
   findUserByEmail,
   findUserByUid,
@@ -21,7 +20,7 @@ import { normalizeKenyanPhone, isValidKenyanPhone } from "@/lib/utils/formatters
 import type { User } from "@/types";
 
 async function invalidateUserCache(uid: string): Promise<void> {
-  
+  const { redis } = await import("@/lib/redis/client");
   await redis.del(`user:me:${uid}`).catch(() => undefined);
 }
 
@@ -242,7 +241,7 @@ auth.get("/me", authMiddleware, async (c) => {
   const { uid } = c.get("user");
 
   // Short cache (10s) to absorb React StrictMode double-invocation and rapid re-renders
-  
+  const { redis } = await import("@/lib/redis/client");
   const cacheKey = `user:me:${uid}`;
   const cached = await redis.get<ReturnType<typeof toApiUser>>(cacheKey).catch(() => null);
   if (cached != null) {
@@ -258,7 +257,7 @@ auth.get("/me", authMiddleware, async (c) => {
   }
 
   const apiUser = toApiUser(userRow);
-  await redis.set(cacheKey, apiUser, { ex: 30 }).catch(() => undefined);
+  await redis.set(cacheKey, apiUser, { ex: 10 }).catch(() => undefined);
 
   return c.json({ success: true, data: apiUser });
 });
@@ -488,7 +487,7 @@ auth.post(
     // Issue a short-lived pin-verified token stored in Redis
     // Frontend sends this token with sensitive requests instead of re-asking PIN
     const verificationKey = `pin_verified:${uid}:${Date.now()}`;
-    
+    const { redis } = await import("@/lib/redis/client");
     const token = Buffer.from(`${uid}:${Date.now()}`).toString("base64");
     await redis.set(`pin_token:${token}`, uid, { ex: 5 * 60 }); // 5 minute window
 
@@ -627,7 +626,7 @@ auth.post("/totp/setup", authMiddleware, async (c) => {
   const secret = crypto.randomBytes(20).toString("base64url").slice(0, 32).toUpperCase();
 
   // Store the unconfirmed secret temporarily in Redis (10 min to complete setup)
-  
+  const { redis } = await import("@/lib/redis/client");
   await redis.set(`totp_pending:${uid}`, secret, { ex: 10 * 60 });
 
   // Build otpauth URI for QR generation
@@ -652,7 +651,7 @@ auth.post(
     const { uid } = c.get("user");
     const { code } = c.req.valid("json");
 
-    
+    const { redis } = await import("@/lib/redis/client");
     const secret = await redis.get<string>(`totp_pending:${uid}`);
     if (!secret) {
       return c.json({ success: false, error: "Setup session expired. Please start again.", statusCode: 400 }, 400);
@@ -932,132 +931,6 @@ auth.delete("/whitelist/:id", authMiddleware, async (c) => {
   const db = getDb();
   await db.from("withdrawal_whitelist").delete().eq("id", id).eq("uid", uid);
   return c.json({ success: true, data: { deleted: id } });
-});
-
-/* ─── PATCH /me — Update profile ─────────────────────────────────────────── */
-auth.patch(
-  "/me",
-  authMiddleware,
-  zValidator("json", z.object({
-    displayName:    z.string().min(1).max(32).optional(),
-    avatarBase64:   z.string().optional(),
-    avatarMimeType: z.string().optional(),
-  })),
-  async (c) => {
-    const uid  = c.get("uid") as string;
-    const body = c.req.valid("json");
-    const db   = getDb();
-
-    const updates: Record<string, string> = {};
-    if (body.displayName) updates.display_name = body.displayName;
-
-    if (body.avatarBase64 && body.avatarMimeType) {
-      const ext        = body.avatarMimeType === "image/png" ? "png" : "jpg";
-      const fileName   = `avatars/${uid}.${ext}`;
-      const { createClient } = await import("@supabase/supabase-js");
-      const admin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY ?? ""
-      );
-      const buf = Buffer.from(body.avatarBase64, "base64");
-      const { data: upload } = await admin.storage
-        .from("user-avatars")
-        .upload(fileName, buf, { contentType: body.avatarMimeType, upsert: true });
-      if (upload) {
-        const { data: url } = admin.storage.from("user-avatars").getPublicUrl(fileName);
-        updates.avatar_url = url.publicUrl;
-      }
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await db.from("users").update(updates).eq("uid", uid);
-    }
-
-    return c.json({ success: true });
-  }
-);
-
-/* ─── GET /api-keys ──────────────────────────────────────────────────────── */
-auth.get("/api-keys", authMiddleware, async (c) => {
-  const uid = c.get("uid") as string;
-  const db  = getDb();
-
-  const { data } = await db
-    .from("api_keys")
-    .select("id, label, key_prefix, permissions, ip_whitelist, is_active, created_at, last_used_at")
-    .eq("uid", uid)
-    .order("created_at", { ascending: false });
-
-  return c.json({ success: true, data: data ?? [] });
-});
-
-/* ─── POST /api-keys — Create a new API key ──────────────────────────────── */
-auth.post(
-  "/api-keys",
-  authMiddleware,
-  zValidator("json", z.object({
-    label:       z.string().min(1).max(50),
-    permissions: z.array(z.string()).min(1),
-    ipWhitelist: z.array(z.string()).nullable().optional(),
-  })),
-  async (c) => {
-    const uid  = c.get("uid") as string;
-    const body = c.req.valid("json");
-    const db   = getDb();
-
-    // Max 30 keys
-    const { count } = await db.from("api_keys").select("id", { count: "exact", head: true }).eq("uid", uid);
-    if ((count ?? 0) >= 30) return c.json({ success: false, error: "Maximum 30 API keys allowed" }, 400);
-
-    // Require IP restriction for withdrawal permission
-    if (body.permissions.includes("withdraw") && (!body.ipWhitelist || body.ipWhitelist.length === 0)) {
-      return c.json({ success: false, error: "IP restriction is required to enable withdrawal permission" }, 400);
-    }
-
-    // Generate key and secret
-    const crypto    = await import("crypto");
-    const apiKey    = "kk_" + crypto.randomBytes(16).toString("hex");
-    const secret    = "kks_" + crypto.randomBytes(32).toString("hex");
-    const secretHash = crypto.createHash("sha256").update(secret).digest("hex");
-    const keyPrefix = apiKey.slice(0, 8) + "..." + apiKey.slice(-4);
-
-    await db.from("api_keys").insert({
-      uid,
-      label:        body.label,
-      key:          apiKey,
-      secret_hash:  secretHash,
-      key_prefix:   keyPrefix,
-      permissions:  body.permissions,
-      ip_whitelist: body.ipWhitelist ?? null,
-      is_active:    true,
-    });
-
-    return c.json({ success: true, key: apiKey, secret }, 201);
-  }
-);
-
-/* ─── PATCH /api-keys/:id ────────────────────────────────────────────────── */
-auth.patch(
-  "/api-keys/:id",
-  authMiddleware,
-  zValidator("json", z.object({ is_active: z.boolean() })),
-  async (c) => {
-    const uid  = c.get("uid") as string;
-    const id   = c.req.param("id");
-    const body = c.req.valid("json");
-    const db   = getDb();
-    await db.from("api_keys").update({ is_active: body.is_active }).eq("id", id).eq("uid", uid);
-    return c.json({ success: true });
-  }
-);
-
-/* ─── DELETE /api-keys/:id ───────────────────────────────────────────────── */
-auth.delete("/api-keys/:id", authMiddleware, async (c) => {
-  const uid = c.get("uid") as string;
-  const id  = c.req.param("id");
-  const db  = getDb();
-  await db.from("api_keys").delete().eq("id", id).eq("uid", uid);
-  return c.json({ success: true });
 });
 
 export default auth;

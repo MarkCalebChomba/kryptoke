@@ -1,17 +1,13 @@
 "use client";
 
-import { useState as _useState, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "@/lib/api/client";
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "@/lib/api/client";
-import dynamic from "next/dynamic";
 import { useRouter, useParams } from "next/navigation";
+import { ChartSection } from "@/components/trade/ChartSection";
 import { TokenInfoTab } from "@/components/token-detail/TokenInfoTab";
 import { AuditTab } from "@/components/token-detail/AuditTab";
 import { TradingDataTab } from "@/components/token-detail/TradingDataTab";
 import { PriceAlertSheet } from "@/components/token-detail/PriceAlertSheet";
-
+import { ComingSoonSheet } from "@/components/shared/BottomSheet";
 import { useMultiPeriodReturns } from "@/lib/hooks/useTokenDetail";
 import { useTicker } from "@/lib/hooks/useMarketData";
 import { usePreferences } from "@/lib/store";
@@ -23,130 +19,11 @@ import {
   IconChevronLeft, IconBell, IconStarFilled, IconStar, IconChevronDown,
 } from "@/components/icons";
 
-// Lazy — chart is heavy (TradingView script + lightweight-charts bundle).
-// Page header with live price renders instantly; chart streams in after.
-const ChartSection = dynamic(
-  () => import("@/components/trade/ChartSection").then(m => ({ default: m.ChartSection })),
-  {
-    ssr: false,
-    loading: () => <div className="h-[300px] bg-bg-surface animate-pulse" />,
-  }
-);
-
 type DetailTab = "Price" | "Info" | "Trading Data" | "Audit" | "Square";
 
 const DETAIL_TABS: DetailTab[] = ["Price", "Info", "Trading Data", "Audit", "Square"];
 
 const MAJOR_COINS = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOT", "MATIC", "LINK", "LTC"];
-
-
-/* ─── Square Community Tab ───────────────────────────────────────────────── */
-interface SquarePost {
-  id: string;
-  uid: string;
-  content: string;
-  coin_tags: string[];
-  likes_count: number;
-  created_at: string;
-  users?: { display_name?: string; avatar_url?: string };
-}
-
-function SquareTab({ symbol }: { symbol: string }) {
-  const toast = useToastActions();
-  const qc = useQueryClient();
-  const [newPost, setNewPost] = useState("");
-  const [posting, setPosting] = useState(false);
-
-  const { data: postsData, isLoading } = useQuery({
-    queryKey: ["square", symbol],
-    queryFn: () => apiGet<{ data: SquarePost[] }>(`/account/square/posts?coin=${symbol}&limit=20`),
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-
-  const posts = postsData?.data ?? [];
-
-  async function submitPost() {
-    if (!newPost.trim()) return;
-    setPosting(true);
-    try {
-      await apiPost("/account/square/posts", { content: newPost.trim(), coin_tags: [symbol] });
-      toast.success("Posted!");
-      setNewPost("");
-      qc.invalidateQueries({ queryKey: ["square", symbol] });
-    } catch {
-      toast.error("Failed to post");
-    } finally {
-      setPosting(false);
-    }
-  }
-
-  return (
-    <div className="px-4 pt-3 pb-24 space-y-3">
-      {/* Compose */}
-      <div className="card">
-        <textarea
-          value={newPost}
-          onChange={e => setNewPost(e.target.value.slice(0, 1000))}
-          className="w-full bg-transparent font-outfit text-sm text-text-primary outline-none resize-none placeholder:text-text-muted"
-          placeholder={`Share your thoughts on $${symbol}...`}
-          rows={3}
-        />
-        <div className="flex items-center justify-between mt-2">
-          <span className="font-outfit text-[10px] text-text-muted">{newPost.length}/1000</span>
-          <button
-            onClick={submitPost}
-            disabled={!newPost.trim() || posting}
-            className="px-4 py-1.5 rounded-lg bg-primary font-outfit text-xs font-bold text-bg disabled:opacity-50">
-            {posting ? "Posting..." : "Post"}
-          </button>
-        </div>
-      </div>
-
-      {/* Posts */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {[1,2,3].map(i => <div key={i} className="skeleton h-20 rounded-xl" />)}
-        </div>
-      ) : posts.length === 0 ? (
-        <div className="py-12 text-center">
-          <p className="text-3xl mb-2">💬</p>
-          <p className="font-syne font-bold text-sm text-text-primary mb-1">No posts yet</p>
-          <p className="font-outfit text-xs text-text-muted">Be the first to share your analysis on ${symbol}</p>
-        </div>
-      ) : (
-        posts.map(post => (
-          <div key={post.id} className="card">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center flex-shrink-0">
-                <span className="font-price text-[10px] font-bold text-primary">
-                  {(post.users?.display_name ?? "U").slice(0, 2).toUpperCase()}
-                </span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-outfit text-xs font-semibold text-text-primary">
-                  {post.users?.display_name ?? "Trader"}
-                </p>
-                <p className="font-outfit text-[9px] text-text-muted">
-                  {new Date(post.created_at).toLocaleDateString("en-KE", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                </p>
-              </div>
-            </div>
-            <p className="font-outfit text-sm text-text-secondary leading-relaxed">{post.content}</p>
-            <div className="flex items-center gap-3 mt-2">
-              <span className="font-outfit text-[10px] text-text-muted">❤ {post.likes_count}</span>
-              {post.coin_tags?.map(tag => (
-                <span key={tag} className="font-outfit text-[9px] text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                  ${tag}
-                </span>
-              ))}
-            </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
 
 export default function TokenDetailPage() {
   const router = useRouter();
@@ -160,8 +37,7 @@ export default function TokenDetailPage() {
 
   const [activeTab, setActiveTab] = useState<DetailTab>("Price");
   const [alertOpen, setAlertOpen] = useState(false);
-  const [squareOpen, setSquareOpen] = useState(false);
-  const [newPost, setNewPost] = useState("");
+  const [comingSoon, setComingSoon] = useState(false);
 
   const { price, change, high, low, volume } = useTicker(`${symbol}USDT`);
   const { isFavorite, toggleFavorite } = usePreferences();
@@ -239,7 +115,7 @@ export default function TokenDetailPage() {
           <button
             key={tab}
             onClick={() => {
-              if (tab === "Square") { setActiveTab("Square"); return; }
+              if (tab === "Square") { setComingSoon(true); return; }
               setActiveTab(tab);
             }}
             className={cn(
@@ -302,10 +178,7 @@ export default function TokenDetailPage() {
       )}
 
       {activeTab === "Info" && (
-        <TokenInfoTab
-          coingeckoId={isMajor ? symbol.toLowerCase() : null}
-          contractAddress={tokenAddress}
-        />
+        <TokenInfoTab symbol={symbol} />
       )}
 
       {activeTab === "Trading Data" && (
@@ -314,10 +187,6 @@ export default function TokenDetailPage() {
 
       {activeTab === "Audit" && (
         <AuditTab tokenAddress={tokenAddress} isMajorCoin={isMajor} />
-      )}
-
-      {activeTab === "Square" && (
-        <SquareTab symbol={symbol} />
       )}
 
       {/* Buy / Sell bottom bar — sticky above bottom nav */}
@@ -349,7 +218,12 @@ export default function TokenDetailPage() {
         tokenSymbol={symbol}
         currentPrice={price}
       />
-
+      <ComingSoonSheet
+        isOpen={comingSoon}
+        onClose={() => setComingSoon(false)}
+        featureName="Square Community"
+        description="Discuss price action, share analysis, and get signals from other KryptoKe traders. Community features are launching soon — join our Telegram in the meantime."
+      />
     </div>
   );
 }

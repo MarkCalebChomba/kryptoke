@@ -8,7 +8,6 @@ import { getBalance, upsertBalance, createLedgerEntry } from "@/server/db/balanc
 import { add, subtract, multiply, divide, lt, gt } from "@/lib/utils/money";
 import { Notifications } from "@/server/services/notifications";
 import { redis } from "@/lib/redis/client";
-import { routeOrderToExchange, routeCloseToExchange } from "@/server/services/exchange";
 import type { Context } from "hono";
 
 const futures = new Hono();
@@ -117,20 +116,10 @@ futures.post(
     const { symbol, side, margin, leverage, takeProfit, stopLoss, orderType, limitPrice } = c.req.valid("json");
     const db = getDb();
 
-    // Load fee config from system_config
-    const { data: feeConfigs } = await db
-      .from("system_config")
-      .select("key,value")
-      .in("key", ["futures_fee_per_trade", "futures_spread_percent"]);
-    const feeMap = Object.fromEntries((feeConfigs ?? []).map(r => [r.key, r.value]));
-    const flatFee     = parseFloat(feeMap["futures_fee_per_trade"]   ?? "0.05");
-    const spreadPct   = parseFloat(feeMap["futures_spread_percent"]  ?? "0.0004");
-
-    // Check trading balance (margin + flat fee)
+    // Check trading balance
     const tradingBalance = await getBalance(uid, "USDT", "trading");
-    const totalRequired  = add(margin, flatFee.toString());
-    if (gt(totalRequired, tradingBalance)) {
-      return c.json({ success: false, error: `Insufficient trading balance. Need ${totalRequired} USDT (margin + $${flatFee} fee).`, statusCode: 400 }, 400);
+    if (gt(margin, tradingBalance)) {
+      return c.json({ success: false, error: "Insufficient trading balance. Transfer funds from Funding to Trading.", statusCode: 400 }, 400);
     }
 
     // Get entry price
@@ -146,40 +135,17 @@ futures.post(
       }
     }
 
-    // Apply spread to entry price (makes it slightly worse for client)
-    const spreadAmount = multiply(entryPrice, spreadPct.toString());
-    const effectiveEntry = side === "long"
-      ? add(entryPrice, spreadAmount)        // long: slightly higher entry
-      : subtract(entryPrice, spreadAmount);  // short: slightly lower entry
+    // Notional = margin × leverage
+    const notional = multiply(margin, leverage.toString());
+    // Quantity = notional / entryPrice
+    const quantity = divide(notional, entryPrice);
+    const liqPrice = calcLiqPrice(side, entryPrice, leverage);
 
-    const notional   = multiply(margin, leverage.toString());
-    const quantity   = divide(notional, effectiveEntry);
-    const liqPrice   = calcLiqPrice(side, effectiveEntry, leverage);
-
-    // Deduct margin + flat fee from trading balance
-    const newBalance = subtract(tradingBalance, totalRequired);
+    // Deduct margin from trading balance immediately
+    const newBalance = subtract(tradingBalance, margin);
     await upsertBalance(uid, "USDT", newBalance, "trading");
 
-    // Route to exchange (OKX → Binance → Bybit fallback)
-    let exchangeOrderId: string | undefined;
-    let exchangeName = "internal";
-    try {
-      
-      const exOrder = await routeOrderToExchange({
-        symbol, side, quantity, orderType,
-        price:    orderType === "limit" ? limitPrice : undefined,
-        tpPrice:  takeProfit,
-        slPrice:  stopLoss,
-        leverage,
-      });
-      exchangeOrderId = exOrder.orderId;
-      exchangeName    = exOrder.exchange;
-    } catch (exchangeErr) {
-      // Exchange routing failed — log it but continue (internal book)
-      console.warn("[Futures] Exchange routing failed:", (exchangeErr as Error).message);
-    }
-
-    // Open position in DB
+    // Open position
     const { data: pos, error } = await db
       .from("futures_positions")
       .insert({
@@ -190,33 +156,29 @@ futures.post(
         margin,
         notional,
         quantity,
-        entry_price: effectiveEntry,
+        entry_price: entryPrice,
         mark_price: entryPrice,
         liquidation_price: liqPrice,
         take_profit: takeProfit ?? null,
-        stop_loss:   stopLoss   ?? null,
+        stop_loss: stopLoss ?? null,
         status: orderType === "limit" ? "pending_limit" : "open",
-        exchange: exchangeName,
-        exchange_position_id: exchangeOrderId ?? null,
       })
       .select()
       .single();
 
     if (error || !pos) {
+      // Refund on failure
       await upsertBalance(uid, "USDT", tradingBalance, "trading");
       return c.json({ success: false, error: "Failed to open position", statusCode: 500 }, 500);
     }
 
-    // Ledger entries
     await createLedgerEntry({
-      uid, asset: "USDT", amount: `-${margin}`,
-      type: "trade", reference_id: pos.id,
-      note: `Futures margin: ${side} ${leverage}x ${symbol} @ ${parseFloat(effectiveEntry).toFixed(4)}`,
-    });
-    await createLedgerEntry({
-      uid, asset: "USDT", amount: `-${flatFee}`,
-      type: "fee", reference_id: pos.id,
-      note: `Futures fee: $${flatFee} (${symbol} ${side})`,
+      uid,
+      asset: "USDT",
+      amount: `-${margin}`,
+      type: "trade",
+      reference_id: pos.id,
+      note: `Futures margin: ${side} ${leverage}x ${symbol} @ ${parseFloat(entryPrice).toFixed(4)}`,
     });
 
     return c.json({
@@ -224,12 +186,15 @@ futures.post(
       data: {
         positionId: pos.id,
         symbol: pos.symbol,
-        side, entryPrice: effectiveEntry, notional, quantity, leverage,
-        liquidationPrice: liqPrice, margin,
-        fee: flatFee, spreadPercent: spreadPct,
-        exchange: exchangeName,
+        side,
+        entryPrice,
+        notional,
+        quantity,
+        leverage,
+        liquidationPrice: liqPrice,
+        margin,
         newTradingBalance: newBalance,
-        message: `${side === "long" ? "Long" : "Short"} opened via ${exchangeName}`,
+        message: `${side === "long" ? "Long" : "Short"} position opened`,
       },
     });
   }

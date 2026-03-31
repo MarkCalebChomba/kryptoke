@@ -100,32 +100,4 @@ analytics.get("/spot-pnl", async (c) => {
   });
 });
 
-/* ─── GET /export-csv — Download ledger as CSV ──────────────────────────── */
-analytics.get("/export-csv", authMiddleware, async (c) => {
-  const uid = c.get("uid") as string;
-  const db  = getDb();
-
-  const { data } = await db
-    .from("ledger_entries")
-    .select("created_at, type, asset, amount, note")
-    .eq("uid", uid)
-    .order("created_at", { ascending: false })
-    .limit(5000);
-
-  const rows = data ?? [];
-  const header = "Date,Type,Asset,Amount,Note\n";
-  const body   = rows.map(r =>
-    `"${r.created_at}","${r.type}","${r.asset}","${r.amount}","${(r.note ?? "").replace(/"/g, "'")}"`
-  ).join("\n");
-
-  const csv = header + body;
-
-  return new Response(csv, {
-    headers: {
-      "Content-Type": "text/csv",
-      "Content-Disposition": `attachment; filename="kryptoke-statement-${new Date().toISOString().split("T")[0]}.csv"`,
-    },
-  });
-});
-
 export default analytics;
