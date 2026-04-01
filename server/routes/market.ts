@@ -746,13 +746,23 @@ market.get("/coins", authMiddleware, async (c) => {
 
   const hasTokens = (tokens ?? []).length > 0;
 
-  // ── If no tokens in DB OR no prices in Redis — fall back to live Binance
-  if (!hasTokens || !hasPrices) {
-    const { data, total } = await fetchBinanceFallback(search, tab, offset, limit);
+  // ── If no tokens in DB — use KNOWN_COINS static list (never calls blocked Binance)
+  if (!hasTokens) {
+    const staticCoins = Object.entries(KNOWN_COINS)
+      .filter(([sym]) => !search || sym.includes(search) || KNOWN_COINS[sym]?.name.toUpperCase().includes(search))
+      .map(([sym, info]) => ({
+        symbol: sym, name: info.name,
+        logo_url: CMC_LOGO(info.cmcId), cmc_rank: info.rank,
+        chain_ids: [] as string[], is_depositable: false,
+        price: "0", change_24h: "0", change_1h: "0",
+        volume_24h: "0", high_24h: "0", low_24h: "0", source: "static",
+      }))
+      .sort((a, b) => a.cmc_rank - b.cmc_rank)
+      .slice(offset, offset + limit);
     return c.json({
       success: true,
-      data,
-      meta: { page, limit, total, tab, chain: chain || null, source: "binance_fallback" },
+      data: staticCoins,
+      meta: { page, limit, total: Object.keys(KNOWN_COINS).length, tab, chain: null, source: "static_fallback" },
     });
   }
 
@@ -779,13 +789,28 @@ market.get("/coins", authMiddleware, async (c) => {
     })
     .filter(Boolean) as NonNullable<ReturnType<typeof Array.prototype.map>>[];
 
-  // ── If merged is still empty (tokens exist but no prices matched), fall back
+  // ── If merged is still empty (tokens exist but no prices matched yet)
+  // Return tokens without price data rather than calling blocked Binance API from server
   if (merged.length === 0) {
-    const { data, total } = await fetchBinanceFallback(search, tab, offset, limit);
+    const noPriceFallback = (tokens ?? []).map((t) => ({
+      symbol:         t.symbol,
+      name:           t.name,
+      logo_url:       t.logo_url,
+      cmc_rank:       t.cmc_rank,
+      chain_ids:      t.chain_ids,
+      is_depositable: t.is_depositable,
+      price:          "0",
+      change_24h:     "0",
+      change_1h:      "0",
+      volume_24h:     "0",
+      high_24h:       "0",
+      low_24h:        "0",
+      source:         "pending",
+    })).slice(offset, offset + limit);
     return c.json({
       success: true,
-      data,
-      meta: { page, limit, total, tab, chain: chain || null, source: "binance_fallback" },
+      data: noPriceFallback,
+      meta: { page, limit, total: (tokens ?? []).length, tab, chain: chain || null, source: "no_prices" },
     });
   }
 

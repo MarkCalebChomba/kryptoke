@@ -77,7 +77,7 @@ const nextConfig = {
                 "https://api.mainnet-beta.solana.com",
                 "https://blockstream.info",
               ].join(" "),
-              "frame-src https://s.tradingview.com https://www.tradingview.com",
+              "frame-src https://s.tradingview.com https://www.tradingview.com https://www.tradingview-widget.com",
               "worker-src 'self' blob:",
             ].join("; "),
           },
