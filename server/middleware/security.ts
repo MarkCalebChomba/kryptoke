@@ -43,8 +43,8 @@ export async function injectionGuard(c: Context, next: Next): Promise<Response |
     /(\.\.\/)|(\.\.\\)|(\%2e\%2e)|(\%252e)/i,
     // Template injection
     /(\{\{|\}\}|\$\{|<%=|<%)/,
-    // Command injection
-    /([;&|`$]|\|\||&&|>>|<<)/,
+    // Command injection (& excluded — it's a valid URL query string separator)
+    /([;|`$]|\|\||>>|<<)/,
     // LDAP / NoSQL injection
     /(\(uid=|\(objectclass=|\$where|\$gt|\$lt|\$ne|\$regex|\$or|\$and)/i,
   ];
