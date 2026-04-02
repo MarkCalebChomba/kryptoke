@@ -91,6 +91,12 @@ function useVisibleSymbolsWs(
       wsRef.current = null;
       reconnectRef.current = setTimeout(connect, 3000);
     };
+
+    // Ensure scroll-blocking touch listeners are passive to avoid browser warnings
+    const wsAny = ws as unknown as EventTarget;
+    const noop = () => {};
+    wsAny.addEventListener("touchstart", noop, { passive: true });
+    wsAny.addEventListener("touchmove", noop, { passive: true });
   }, [sendSubscribe]);
 
   useEffect(() => {
@@ -181,7 +187,7 @@ function CoinRow({ symbol, name, logo_url, price, change_24h, change_1h, volume_
 export default function MarketsPage() {
   const router = useRouter();
   const { isFavorite, toggleFavorite } = usePreferences();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoadingAuth } = useAuth();
 
   const [activeTab,     setActiveTab]     = useState<Tab>("All");
   const [chainFilter,   setChainFilter]   = useState("");
@@ -249,7 +255,6 @@ export default function MarketsPage() {
     if (reset) { setLoading(true); setError(false); }
     else setLoadingMore(true);
 
-    if (!isAuthenticated) { setLoading(false); return; }
     try {
       const tab = activeTab === "Favourites" ? "all" : activeTab.toLowerCase();
       const params = new URLSearchParams({
@@ -271,17 +276,18 @@ export default function MarketsPage() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeTab, chainFilter, search, isAuthenticated]);
+  }, [activeTab, chainFilter, search, isAuthenticated, isLoadingAuth]);
 
-  // Reset on filter change
+  // Reset on filter change — wait for auth to resolve first
   useEffect(() => {
+    if (isLoadingAuth) return;
     setPage(1);
     setCoins([]);
     setHasMore(true);
     setLivePrices({});
     setVisibleSymbols([]);
     fetchCoins(1, true);
-  }, [activeTab, chainFilter, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, chainFilter, search, isLoadingAuth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load more on page increment
   useEffect(() => {

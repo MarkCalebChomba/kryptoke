@@ -218,9 +218,22 @@ market.get("/orderbook/:symbol", async (c) => {
       updatedAt: Date.now(),
     };
 
+    // Cache for 10 seconds
+    await redis.set(CacheKeys.orderBook(symbol), orderBook, { ex: 10 });
     return c.json({ success: true, data: orderBook });
   } catch {
-    return c.json({ success: false, error: "Order book unavailable", statusCode: 503 }, 503);
+    // Return empty but valid order book structure so UI doesn't crash
+    return c.json({
+      success: true,
+      data: {
+        symbol: symbol.toUpperCase(),
+        bids: [],
+        asks: [],
+        spread: "0",
+        updatedAt: Date.now(),
+        unavailable: true,
+      },
+    });
   }
 });
 
@@ -244,7 +257,7 @@ market.get("/ticker/:symbol", async (c) => {
       { signal: AbortSignal.timeout(5000) }
     );
 
-    if (!res.ok) throw new Error("Ticker unavailable");
+    if (!res.ok) throw new Error("Binance unavailable");
 
     const data = (await res.json()) as {
       symbol: string;
@@ -267,6 +280,42 @@ market.get("/ticker/:symbol", async (c) => {
       updatedAt: Date.now(),
     };
 
+    // Cache for 30 seconds so subsequent requests are instant
+    await redis.set(CacheKeys.binanceTicker(symbol), ticker, { ex: 30 });
+    return c.json({ success: true, data: ticker });
+  } catch { /* fall through to CoinGecko */ }
+
+  // Fallback: CoinGecko simple price (not blocked by Vercel)
+  try {
+    const baseSymbol = symbol.toUpperCase().replace("USDT", "").replace("USDC", "").toLowerCase();
+    const cgRes = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${baseSymbol}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_high_24hr=true&include_low_24hr=true`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+
+    if (!cgRes.ok) throw new Error("CoinGecko unavailable");
+
+    const cgData = await cgRes.json() as Record<string, {
+      usd?: number; usd_24h_change?: number; usd_24h_vol?: number;
+      usd_24h_high?: number; usd_24h_low?: number;
+    }>;
+
+    const coin = cgData[baseSymbol];
+    if (!coin?.usd) throw new Error("No CoinGecko data");
+
+    const ticker = {
+      symbol: symbol.toUpperCase(),
+      lastPrice: coin.usd.toString(),
+      priceChangePercent: (coin.usd_24h_change ?? 0).toFixed(2),
+      highPrice: (coin.usd_24h_high ?? coin.usd).toString(),
+      lowPrice: (coin.usd_24h_low ?? coin.usd).toString(),
+      volume: "0",
+      quoteVolume: (coin.usd_24h_vol ?? 0).toString(),
+      updatedAt: Date.now(),
+      source: "coingecko",
+    };
+
+    await redis.set(CacheKeys.binanceTicker(symbol), ticker, { ex: 60 });
     return c.json({ success: true, data: ticker });
   } catch {
     return c.json({ success: false, error: "Ticker unavailable", statusCode: 503 }, 503);
