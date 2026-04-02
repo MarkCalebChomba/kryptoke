@@ -4,12 +4,10 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { formatPrice, formatVolume, formatChange, priceDirection } from "@/lib/utils/formatters";
-import { usePreferences, useAuth } from "@/lib/store";
+import { usePreferences } from "@/lib/store";
 import { SkeletonCoinRow } from "@/components/shared/Skeleton";
 import { IconSearch, IconStarFilled, IconStar } from "@/components/icons";
 import { apiGet } from "@/lib/api/client";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Coin {
   symbol:     string;
@@ -30,7 +28,7 @@ type SortKey = "volume" | "price" | "change";
 type SortDir = "asc" | "desc";
 
 const TABS: Tab[] = ["All", "Favourites", "Hot", "Gainers", "Losers"];
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 100;
 
 const CHAIN_FILTERS = [
   { label: "All Chains", value: "" },
@@ -41,14 +39,9 @@ const CHAIN_FILTERS = [
   { label: "Bitcoin",    value: "BTC" },
 ];
 
-// ── WebSocket — subscribes only to visible symbols ────────────────────────────
-
 type PriceUpdate = Record<string, { price: string }>;
 
-function useVisibleSymbolsWs(
-  visibleSymbols: string[],
-  onUpdate: (updates: PriceUpdate) => void
-) {
+function useVisibleSymbolsWs(visibleSymbols: string[], onUpdate: (u: PriceUpdate) => void) {
   const wsRef = useRef<WebSocket | null>(null);
   const subscribedRef = useRef<Set<string>>(new Set());
   const pendingRef = useRef<string[]>([]);
@@ -62,41 +55,34 @@ function useVisibleSymbolsWs(
       pendingRef.current.push(...symbols);
       return;
     }
-    const streams = symbols.map((s) => `${s.toLowerCase()}usdt@miniTicker`);
-    wsRef.current.send(JSON.stringify({ method: "SUBSCRIBE", params: streams, id: Date.now() }));
+    wsRef.current.send(JSON.stringify({
+      method: "SUBSCRIBE",
+      params: symbols.map((s) => `${s.toLowerCase()}usdt@miniTicker`),
+      id: Date.now(),
+    }));
   }, []);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     const ws = new WebSocket("wss://stream.binance.com:9443/ws");
     wsRef.current = ws;
-
     ws.onopen = () => {
       const toSub = [...Array.from(subscribedRef.current), ...pendingRef.current];
       pendingRef.current = [];
-      if (toSub.length > 0) sendSubscribe(toSub);
+      if (toSub.length) sendSubscribe(toSub);
     };
-
-    ws.onmessage = (event) => {
+    ws.onmessage = (e) => {
       try {
-        const msg = JSON.parse(event.data as string);
+        const msg = JSON.parse(e.data as string);
         if (msg.e === "24hrMiniTicker") {
-          const sym = (msg.s as string).replace("USDT", "");
-          onUpdateRef.current({ [sym]: { price: msg.c as string } });
+          onUpdateRef.current({ [(msg.s as string).replace("USDT", "")]: { price: msg.c as string } });
         }
       } catch { /* ignore */ }
     };
-
     ws.onclose = () => {
       wsRef.current = null;
       reconnectRef.current = setTimeout(connect, 3000);
     };
-
-    // Ensure scroll-blocking touch listeners are passive to avoid browser warnings
-    const wsAny = ws as unknown as EventTarget;
-    const noop = () => {};
-    wsAny.addEventListener("touchstart", noop, { passive: true });
-    wsAny.addEventListener("touchmove", noop, { passive: true });
   }, [sendSubscribe]);
 
   useEffect(() => {
@@ -109,21 +95,19 @@ function useVisibleSymbolsWs(
   }, [connect]);
 
   useEffect(() => {
-    const newSymbols = visibleSymbols.filter((s) => !subscribedRef.current.has(s));
-    if (newSymbols.length === 0) return;
-    newSymbols.forEach((s) => subscribedRef.current.add(s));
+    const fresh = visibleSymbols.filter((s) => !subscribedRef.current.has(s));
+    if (!fresh.length) return;
+    fresh.forEach((s) => subscribedRef.current.add(s));
     clearTimeout(flushRef.current);
-    flushRef.current = setTimeout(() => sendSubscribe(newSymbols), 100);
+    flushRef.current = setTimeout(() => sendSubscribe(fresh), 100);
   }, [visibleSymbols, sendSubscribe]);
 }
 
-// ── Coin row ──────────────────────────────────────────────────────────────────
-
 interface CoinRowProps extends Coin {
-  showChange:   "1h" | "24h";
-  isFav:        boolean;
-  onToggleFav:  (symbol: string) => void;
-  onClick:      () => void;
+  showChange:  "1h" | "24h";
+  isFav:       boolean;
+  onToggleFav: (symbol: string) => void;
+  onClick:     () => void;
   observerRef?: (el: HTMLButtonElement | null) => void;
 }
 
@@ -131,14 +115,9 @@ function CoinRow({ symbol, name, logo_url, price, change_24h, change_1h, volume_
   showChange, isFav, onToggleFav, onClick, observerRef }: CoinRowProps) {
   const change = showChange === "1h" ? change_1h : change_24h;
   const dir = priceDirection(change);
-
   return (
-    <button
-      ref={observerRef}
-      data-symbol={symbol}
-      onClick={onClick}
-      className="flex items-center gap-3 px-4 py-2.5 w-full active:bg-bg-surface2 transition-colors"
-    >
+    <button ref={observerRef} data-symbol={symbol} onClick={onClick}
+      className="flex items-center gap-3 px-4 py-2.5 w-full active:bg-bg-surface2 transition-colors">
       <div className="w-8 h-8 rounded-full bg-bg-surface2 border border-border flex-shrink-0 overflow-hidden flex items-center justify-center">
         {logo_url
           // eslint-disable-next-line @next/next/no-img-element
@@ -147,7 +126,6 @@ function CoinRow({ symbol, name, logo_url, price, change_24h, change_1h, volume_
           : <span className="font-price text-[10px] text-text-muted">{symbol.slice(0, 2)}</span>
         }
       </div>
-
       <div className="flex-1 text-left min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="font-outfit font-semibold text-sm text-text-primary">{symbol}</span>
@@ -155,7 +133,6 @@ function CoinRow({ symbol, name, logo_url, price, change_24h, change_1h, volume_
         </div>
         <p className="font-outfit text-[10px] text-text-muted truncate">Vol {formatVolume(volume_24h)}</p>
       </div>
-
       <div className="text-right flex-shrink-0">
         <p className="font-price text-sm font-medium text-text-primary tabular-nums">{formatPrice(price)}</p>
         <span className={cn(
@@ -163,55 +140,42 @@ function CoinRow({ symbol, name, logo_url, price, change_24h, change_1h, volume_
           dir === "up"   ? "bg-up/20 text-up ring-1 ring-up/30" :
           dir === "down" ? "bg-down/20 text-down ring-1 ring-down/30" :
           "bg-bg-surface2 text-text-muted"
-        )}>
-          {formatChange(change)}
-        </span>
+        )}>{formatChange(change)}</span>
       </div>
-
-      <button
-        onClick={(e) => { e.stopPropagation(); onToggleFav(symbol); }}
+      <button onClick={(e) => { e.stopPropagation(); onToggleFav(symbol); }}
         className="w-8 h-8 flex items-center justify-center flex-shrink-0 tap-target"
-        aria-label={isFav ? "Remove favourite" : "Add favourite"}
-      >
-        {isFav
-          ? <IconStarFilled size={14} className="text-gold" />
-          : <IconStar size={14} className="text-text-muted" />
-        }
+        aria-label={isFav ? "Remove favourite" : "Add favourite"}>
+        {isFav ? <IconStarFilled size={14} className="text-gold" /> : <IconStar size={14} className="text-text-muted" />}
       </button>
     </button>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
-
 export default function MarketsPage() {
   const router = useRouter();
   const { isFavorite, toggleFavorite } = usePreferences();
-  const { isAuthenticated, isLoadingAuth } = useAuth();
 
-  const [activeTab,     setActiveTab]     = useState<Tab>("All");
-  const [chainFilter,   setChainFilter]   = useState("");
-  const [search,        setSearch]        = useState("");
-  const [searchVisible, setSearchVisible] = useState(false);
-  const [showChange,    setShowChange]    = useState<"1h" | "24h">("24h");
-  const [sortKey,       setSortKey]       = useState<SortKey>("volume");
-  const [sortDir,       setSortDir]       = useState<SortDir>("desc");
-  const [coins,         setCoins]         = useState<Coin[]>([]);
-  const [page,          setPage]          = useState(1);
-  const [hasMore,       setHasMore]       = useState(true);
-  const [loading,       setLoading]       = useState(true);
-  const [loadingMore,   setLoadingMore]   = useState(false);
-  const [error,         setError]         = useState(false);
-  const [livePrices,    setLivePrices]    = useState<PriceUpdate>({});
-  const [visibleSymbols,setVisibleSymbols]= useState<string[]>([]);
+  const [activeTab,      setActiveTab]      = useState<Tab>("All");
+  const [chainFilter,    setChainFilter]    = useState("");
+  const [search,         setSearch]         = useState("");
+  const [searchVisible,  setSearchVisible]  = useState(false);
+  const [showChange,     setShowChange]     = useState<"1h" | "24h">("24h");
+  const [sortKey,        setSortKey]        = useState<SortKey>("volume");
+  const [sortDir,        setSortDir]        = useState<SortDir>("desc");
+  const [coins,          setCoins]          = useState<Coin[]>([]);
+  const [page,           setPage]           = useState(1);
+  const [hasMore,        setHasMore]        = useState(true);
+  const [loading,        setLoading]        = useState(true);
+  const [loadingMore,    setLoadingMore]    = useState(false);
+  const [error,          setError]          = useState(false);
+  const [livePrices,     setLivePrices]     = useState<PriceUpdate>({});
+  const [visibleSymbols, setVisibleSymbols] = useState<string[]>([]);
 
-  const handlePriceUpdate = useCallback((updates: PriceUpdate) => {
-    setLivePrices((prev) => ({ ...prev, ...updates }));
-  }, []);
+  useVisibleSymbolsWs(visibleSymbols, useCallback((u: PriceUpdate) => {
+    setLivePrices((prev) => ({ ...prev, ...u }));
+  }, []));
 
-  useVisibleSymbolsWs(visibleSymbols, handlePriceUpdate);
-
-  // IntersectionObserver for visible symbols
+  // Row observer for WS subscription tracking
   const rowObserverRef = useRef<IntersectionObserver | null>(null);
   useEffect(() => {
     rowObserverRef.current = new IntersectionObserver(
@@ -220,25 +184,20 @@ export default function MarketsPage() {
           .filter((e) => e.isIntersecting)
           .map((e) => (e.target as HTMLElement).dataset.symbol)
           .filter(Boolean) as string[];
-        if (visible.length > 0) {
-          setVisibleSymbols((prev) => Array.from(new Set([...prev, ...visible])));
-        }
+        if (visible.length) setVisibleSymbols((prev) => Array.from(new Set([...prev, ...visible])));
       },
       { rootMargin: "100px" }
     );
     return () => rowObserverRef.current?.disconnect();
   }, []);
-
   const attachObserver = useCallback((el: HTMLButtonElement | null) => {
     if (el && rowObserverRef.current) rowObserverRef.current.observe(el);
   }, []);
 
-  // Sentinel for infinite scroll
+  // Infinite scroll sentinel
   const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const sentinelObserverRef = useRef<IntersectionObserver | null>(null);
-
   useEffect(() => {
-    sentinelObserverRef.current = new IntersectionObserver(
+    const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting && hasMore && !loadingMore && !loading) {
           setPage((p) => p + 1);
@@ -246,28 +205,20 @@ export default function MarketsPage() {
       },
       { rootMargin: "200px" }
     );
-    if (sentinelRef.current) sentinelObserverRef.current.observe(sentinelRef.current);
-    return () => sentinelObserverRef.current?.disconnect();
+    if (sentinelRef.current) observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
   }, [hasMore, loadingMore, loading]);
 
-  // Fetch coins
+  // Fetch — only depends on filter values, no auth state
   const fetchCoins = useCallback(async (nextPage: number, reset: boolean) => {
     if (reset) { setLoading(true); setError(false); }
     else setLoadingMore(true);
-
     try {
       const tab = activeTab === "Favourites" ? "all" : activeTab.toLowerCase();
-      const params = new URLSearchParams({
-        page:  String(nextPage),
-        limit: String(PAGE_SIZE),
-        tab,
-      });
+      const params = new URLSearchParams({ page: String(nextPage), limit: String(PAGE_SIZE), tab });
       if (chainFilter) params.set("chain", chainFilter);
       if (search)      params.set("search", search);
-
-      const res = await apiGet<{ data: Coin[]; meta: { total: number } }>(
-        `/market/coins?${params.toString()}`
-      );
+      const res = await apiGet<{ data: Coin[]; meta: { total: number } }>(`/market/coins?${params}`);
       setCoins((prev) => reset ? res.data : [...prev, ...res.data]);
       setHasMore(res.data.length === PAGE_SIZE);
     } catch {
@@ -276,45 +227,43 @@ export default function MarketsPage() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeTab, chainFilter, search, isAuthenticated, isLoadingAuth]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, chainFilter, search]);
 
-  // Reset on filter change — wait for auth to resolve first
+  // Reset on filter change
   useEffect(() => {
-    if (isLoadingAuth) return;
     setPage(1);
     setCoins([]);
     setHasMore(true);
     setLivePrices({});
     setVisibleSymbols([]);
     fetchCoins(1, true);
-  }, [activeTab, chainFilter, search, isLoadingAuth]); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, chainFilter, search]);
 
-  // Load more on page increment
+  // Load more pages
   useEffect(() => {
     if (page > 1) fetchCoins(page, false);
-  }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
-  // Merge live prices
-  const enrichedCoins = useMemo(() => {
-    return coins.map((c) => {
+  const enrichedCoins = useMemo(() =>
+    coins.map((c) => {
       const live = livePrices[c.symbol];
       return live ? { ...c, price: live.price ?? c.price } : c;
-    });
-  }, [coins, livePrices]);
+    }),
+  [coins, livePrices]);
 
-  // Client-side filtering + sorting
   const displayCoins = useMemo(() => {
     let list = enrichedCoins;
     if (activeTab === "Favourites") list = list.filter((c) => isFavorite(c.symbol));
     if (activeTab === "All") {
       list = [...list].sort((a, b) => {
-        const aVal = sortKey === "volume" ? parseFloat(a.volume_24h)
-          : sortKey === "price"  ? parseFloat(a.price)
-          : parseFloat(a.change_24h);
-        const bVal = sortKey === "volume" ? parseFloat(b.volume_24h)
-          : sortKey === "price"  ? parseFloat(b.price)
-          : parseFloat(b.change_24h);
-        return sortDir === "desc" ? bVal - aVal : aVal - bVal;
+        const val = (x: Coin) =>
+          sortKey === "volume" ? parseFloat(x.volume_24h) :
+          sortKey === "price"  ? parseFloat(x.price) :
+          parseFloat(x.change_24h);
+        return sortDir === "desc" ? val(b) - val(a) : val(a) - val(b);
       });
     }
     return list;
@@ -330,7 +279,6 @@ export default function MarketsPage() {
 
   return (
     <div className="screen">
-      {/* Top bar */}
       <div className="top-bar">
         <span className="font-syne font-bold text-base text-text-primary">Markets</span>
         <div className="flex items-center gap-2">
@@ -350,7 +298,6 @@ export default function MarketsPage() {
         </div>
       </div>
 
-      {/* Search */}
       {searchVisible && (
         <div className="px-4 py-2 border-b border-border bg-bg">
           <input type="text" value={search}
@@ -359,7 +306,6 @@ export default function MarketsPage() {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex border-b border-border overflow-x-auto no-scrollbar">
         {TABS.map((tab) => (
           <button key={tab} onClick={() => setActiveTab(tab)}
@@ -370,16 +316,13 @@ export default function MarketsPage() {
         ))}
       </div>
 
-      {/* Chain filter pills */}
       {activeTab === "All" && !search && (
         <div className="flex gap-1.5 px-4 py-2 overflow-x-auto no-scrollbar border-b border-border">
           {CHAIN_FILTERS.map((f) => (
             <button key={f.value} onClick={() => setChainFilter(f.value)}
               className={cn(
                 "flex-shrink-0 px-3 py-1 rounded-full font-outfit text-[11px] font-medium transition-all border",
-                chainFilter === f.value
-                  ? "bg-primary/10 text-primary border-primary/30"
-                  : "text-text-muted border-border"
+                chainFilter === f.value ? "bg-primary/10 text-primary border-primary/30" : "text-text-muted border-border"
               )}>
               {f.label}
             </button>
@@ -387,7 +330,6 @@ export default function MarketsPage() {
         </div>
       )}
 
-      {/* Column headers */}
       {(activeTab === "All" || activeTab === "Favourites") && (
         <div className="flex items-center px-4 py-2 border-b border-border">
           <button onClick={() => handleSort("volume")}
@@ -406,15 +348,12 @@ export default function MarketsPage() {
         </div>
       )}
 
-      {/* Content */}
       {loading ? (
         Array.from({ length: 12 }).map((_, i) => <SkeletonCoinRow key={i} />)
       ) : error ? (
         <div className="py-16 text-center px-6">
           <p className="text-text-muted font-outfit text-sm mb-3">Could not load market data.</p>
-          <button onClick={() => fetchCoins(1, true)} className="text-primary font-outfit text-sm">
-            Try again
-          </button>
+          <button onClick={() => fetchCoins(1, true)} className="text-primary font-outfit text-sm">Try again</button>
         </div>
       ) : displayCoins.length === 0 ? (
         <div className="py-16 text-center">
@@ -426,9 +365,7 @@ export default function MarketsPage() {
       ) : (
         <>
           {displayCoins.map((coin) => (
-            <CoinRow
-              key={coin.symbol}
-              {...coin}
+            <CoinRow key={coin.symbol} {...coin}
               showChange={showChange}
               isFav={isFavorite(coin.symbol)}
               onToggleFav={toggleFavorite}

@@ -740,7 +740,7 @@ async function fetchBinanceFallback(
 
 market.get("/coins", authMiddleware, async (c) => {
   const page   = Math.max(1, parseInt(c.req.query("page")  ?? "1"));
-  const limit  = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "50")), 100);
+  const limit  = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "100")), 200);
   const tab    = (c.req.query("tab") ?? "all").toLowerCase();
   const chain  = c.req.query("chain") ?? "";
   const search = (c.req.query("search") ?? "").toUpperCase().trim();
