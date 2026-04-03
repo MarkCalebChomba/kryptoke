@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils/cn";
 import { IconKryptoKeLogo } from "@/components/icons";
 
 const NAV_ITEMS = [
-  { label: "Dashboard",     href: "/admin",               icon: "⬛" },
+  { label: "Dashboard",     href: "/admin",               icon: "📊" },
   { label: "Orders",        href: "/admin/orders",         icon: "📋" },
-  { label: "Withdrawals",    href: "/admin/withdrawals",    icon: "💸" },
+  { label: "Withdrawals",   href: "/admin/withdrawals",    icon: "💸" },
   { label: "Users",         href: "/admin/users",          icon: "👥" },
   { label: "Transactions",  href: "/admin/transactions",   icon: "💳" },
   { label: "Chains",        href: "/admin/chains",         icon: "🔗" },
@@ -42,54 +42,56 @@ function SidebarItem({ label, href, icon, active }: {
   );
 }
 
+type AdminState = "loading" | "allowed" | "denied";
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, isLoadingAuth } = useAuth();
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const [adminState, setAdminState] = useState<AdminState>("loading");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    // Still loading auth — wait
+    // Still resolving auth from localStorage — wait
     if (isLoadingAuth) return;
-    // Not logged in at all
+
+    // Definitely not logged in
     if (!isAuthenticated) {
       router.replace("/auth/login?redirect=/admin");
       return;
     }
-    // Logged in — verify admin status via the dedicated endpoint
+
+    // Logged in — check admin status
+    setAdminState("loading");
     apiGet<{ isAdmin: boolean; role: string }>("/auth/admin-check")
       .then((data) => {
-        if (data?.isAdmin) {
-          setIsAdmin(true);
-        } else {
-          router.replace("/");
-        }
+        setAdminState(data?.isAdmin ? "allowed" : "denied");
+        if (!data?.isAdmin) router.replace("/");
       })
       .catch(() => {
-        // Fallback: if endpoint doesn't exist, allow access for now
-        // and let the server-side adminMiddleware guard API calls
-        setIsAdmin(true);
-      })
-      .finally(() => setCheckingAdmin(false));
+        // /auth/admin-check endpoint not found or network error
+        // Allow access — server-side adminMiddleware guards individual API calls
+        setAdminState("allowed");
+      });
   }, [isAuthenticated, isLoadingAuth, router]);
 
-  if (isLoadingAuth || checkingAdmin) {
+  if (adminState === "loading") {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="font-outfit text-sm text-text-muted">Checking admin access…</p>
+        </div>
       </div>
     );
   }
 
-  if (!isAdmin) return null;
+  if (adminState === "denied") return null;
 
   return (
     <div className="min-h-screen bg-bg flex">
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex flex-col w-60 flex-shrink-0 border-r border-border bg-bg-surface h-screen sticky top-0 overflow-y-auto">
-        {/* Brand */}
         <div className="flex items-center gap-2 px-4 py-5 border-b border-border">
           <IconKryptoKeLogo size={28} />
           <div>
@@ -98,7 +100,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1">
           {NAV_ITEMS.map((item) => (
             <SidebarItem
@@ -109,7 +110,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           ))}
         </nav>
 
-        {/* Footer */}
         <div className="px-4 py-4 border-t border-border">
           <p className="font-outfit text-[10px] text-text-muted">
             KryptoKe v{process.env.NEXT_PUBLIC_APP_VERSION ?? "1.0.0"}

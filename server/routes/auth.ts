@@ -245,6 +245,13 @@ auth.post(
 
 /* ─── GET /me ───────────────────────────────────────────────────────────── */
 
+auth.get("/admin-check", authMiddleware, async (c) => {
+  const user = c.get("user");
+  const { isAdminUser } = await import("@/server/db/users");
+  const adminStatus = await isAdminUser(user.uid);
+  return c.json({ success: true, data: { isAdmin: adminStatus, role: adminStatus ? "admin" : "user" } });
+});
+
 auth.get("/me", authMiddleware, async (c) => {
   const { uid } = c.get("user");
 
