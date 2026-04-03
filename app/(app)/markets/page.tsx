@@ -218,9 +218,10 @@ export default function MarketsPage() {
       const params = new URLSearchParams({ page: String(nextPage), limit: String(PAGE_SIZE), tab });
       if (chainFilter) params.set("chain", chainFilter);
       if (search)      params.set("search", search);
-      const res = await apiGet<{ data: Coin[]; meta: { total: number } }>(`/market/coins?${params}`);
-      setCoins((prev) => reset ? res.data : [...prev, ...res.data]);
-      setHasMore(res.data.length === PAGE_SIZE);
+      const res = await apiGet<Coin[]>(`/market/coins?${params}`);
+      const coins = Array.isArray(res) ? res : (res as unknown as { data: Coin[] }).data ?? [];
+      setCoins((prev) => reset ? coins : [...prev, ...coins]);
+      setHasMore(coins.length === PAGE_SIZE);
     } catch {
       setError(true);
     } finally {
