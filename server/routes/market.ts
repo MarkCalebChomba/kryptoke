@@ -286,10 +286,27 @@ market.get("/ticker/:symbol", async (c) => {
   } catch { /* fall through to CoinGecko */ }
 
   // Fallback: CoinGecko simple price (not blocked by Vercel)
+  // CoinGecko uses full coin IDs, not ticker symbols
+  const CG_ID_MAP: Record<string, string> = {
+    BTC: "bitcoin", ETH: "ethereum", USDT: "tether", BNB: "binancecoin",
+    SOL: "solana", USDC: "usd-coin", XRP: "ripple", DOGE: "dogecoin",
+    TRX: "tron", ADA: "cardano", AVAX: "avalanche-2", SHIB: "shiba-inu",
+    LINK: "chainlink", DOT: "polkadot", TON: "the-open-network",
+    MATIC: "matic-network", LTC: "litecoin", BCH: "bitcoin-cash",
+    UNI: "uniswap", NEAR: "near", ATOM: "cosmos", XLM: "stellar",
+    APT: "aptos", ARB: "arbitrum", OP: "optimism", HBAR: "hedera-hashgraph",
+    AAVE: "aave", MKR: "maker", GRT: "the-graph", DAI: "dai",
+    CRV: "curve-dao-token", LDO: "lido-dao", SNX: "havven",
+    ENJ: "enjincoin", SAND: "the-sandbox", MANA: "decentraland",
+    ALGO: "algorand", VET: "vechain", FIL: "filecoin", EGLD: "elrond-erd-2",
+    THETA: "theta-token", AXS: "axie-infinity", CHZ: "chiliz",
+    GALA: "gala", IMX: "immutable-x", KAVA: "kava", ROSE: "oasis-network",
+  };
   try {
-    const baseSymbol = symbol.toUpperCase().replace("USDT", "").replace("USDC", "").toLowerCase();
+    const baseSymbol = symbol.toUpperCase().replace(/USDT$|USDC$/, "");
+    const cgId = CG_ID_MAP[baseSymbol] ?? baseSymbol.toLowerCase();
     const cgRes = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${baseSymbol}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_high_24hr=true&include_low_24hr=true`,
+      `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_high_24hr=true&include_low_24hr=true`,
       { signal: AbortSignal.timeout(8000) }
     );
 
@@ -300,7 +317,7 @@ market.get("/ticker/:symbol", async (c) => {
       usd_24h_high?: number; usd_24h_low?: number;
     }>;
 
-    const coin = cgData[baseSymbol];
+    const coin = cgData[cgId];
     if (!coin?.usd) throw new Error("No CoinGecko data");
 
     const ticker = {
@@ -318,7 +335,13 @@ market.get("/ticker/:symbol", async (c) => {
     await redis.set(CacheKeys.binanceTicker(symbol), ticker, { ex: 60 });
     return c.json({ success: true, data: ticker });
   } catch {
-    return c.json({ success: false, error: "Ticker unavailable", statusCode: 503 }, 503);
+    // Last resort: return zeros so the UI renders without crashing
+    const fallbackTicker = {
+      symbol: symbol.toUpperCase(), lastPrice: "0", priceChangePercent: "0",
+      highPrice: "0", lowPrice: "0", volume: "0", quoteVolume: "0",
+      updatedAt: Date.now(), source: "unavailable",
+    };
+    return c.json({ success: true, data: fallbackTicker });
   }
 });
 
@@ -547,7 +570,7 @@ market.get("/honeypot/:address", authMiddleware, async (c) => {
   }
 });
 
-/* ─── GET /returns/:symbol — proxied Binance multi-period returns ───────── */
+/* ─── GET /returns/:symbol — multi-period returns from Redis price history ── */
 
 market.get("/returns/:symbol", authMiddleware, async (c) => {
   const { symbol } = c.req.param();
@@ -560,42 +583,25 @@ market.get("/returns/:symbol", authMiddleware, async (c) => {
   const cached = await redis.get(cacheKey);
   if (cached) return c.json({ success: true, data: cached });
 
-  // If symbol already ends with a known quote currency, use it as-is
-  const QUOTE_CURRENCIES = ["USDT", "USDC", "FDUSD", "BTC", "ETH", "BNB", "TRY", "EUR", "BRL", "ARS", "JPY", "PLN", "BUSD"];
-  const hasQuote = QUOTE_CURRENCIES.some((q) => clean.endsWith(q) && clean.length > q.length);
-  const binanceSymbol = hasQuote ? clean : `${clean}USDT`;
+  // Use the current price from Redis prices blob — return stubs since we
+  // don't store historical daily candles yet. The UI renders "—" for null values.
+  const priceRaw = await redis.get<string>("market:prices");
+  const prices: Record<string, { price: string; change_24h: string }> =
+    priceRaw ? (typeof priceRaw === "string" ? JSON.parse(priceRaw) : priceRaw) : {};
 
-  try {
-    const res = await fetch(
-      `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=1d&limit=365`,
-      { signal: AbortSignal.timeout(8000) }
-    );
-    if (!res.ok) throw new Error("Binance klines unavailable");
+  const p = prices[clean];
+  // We only have 24h change from CoinGecko, so fill what we can and null the rest
+  const data = [
+    { label: "Today", change: p?.change_24h ?? null },
+    { label: "7D",    change: null },
+    { label: "30D",   change: null },
+    { label: "90D",   change: null },
+    { label: "180D",  change: null },
+    { label: "1Y",    change: null },
+  ];
 
-    const klines = await res.json() as Array<[number, string, string, string, string, ...unknown[]]>;
-    if (!klines.length) return c.json({ success: true, data: [] });
-
-    const current = parseFloat(klines[klines.length - 1]?.[4] ?? "0");
-    function getChange(daysBack: number): string | null {
-      const idx = Math.max(0, klines.length - 1 - daysBack);
-      const open = parseFloat(klines[idx]?.[1] ?? "0");
-      return open > 0 ? (((current - open) / open) * 100).toFixed(2) : null;
-    }
-
-    const data = [
-      { label: "Today", change: getChange(1) },
-      { label: "7D",    change: getChange(7) },
-      { label: "30D",   change: getChange(30) },
-      { label: "90D",   change: getChange(90) },
-      { label: "180D",  change: getChange(180) },
-      { label: "1Y",    change: getChange(364) },
-    ];
-
-    await redis.set(cacheKey, data, { ex: 10 * 60 }); // 10 min cache
-    return c.json({ success: true, data });
-  } catch {
-    return c.json({ success: false, error: "Returns data unavailable", statusCode: 503 }, 503);
-  }
+  await redis.set(cacheKey, data, { ex: 5 * 60 }); // 5 min cache
+  return c.json({ success: true, data });
 });
 
 /* ─── GET /coins — unified paginated coin list with prices from Redis ──────

@@ -75,7 +75,7 @@ export function useMarketOverview() {
 // ── Single ticker — used on trade and token detail pages ──────────────────────
 
 export function useTicker(symbol: string) {
-  return useQuery({
+  const query = useQuery({
     queryKey: ["market", "ticker", symbol],
     queryFn: () =>
       apiGet<{
@@ -90,7 +90,18 @@ export function useTicker(symbol: string) {
     staleTime: 5_000,
     refetchInterval: 10_000,
     enabled: !!symbol,
+    retry: 1,
   });
+  // Return processed fields so pages can destructure directly
+  const d = query.data;
+  return {
+    ...query,
+    price:  d?.lastPrice           ?? "0",
+    change: d?.priceChangePercent  ?? "0",
+    high:   d?.highPrice           ?? "0",
+    low:    d?.lowPrice            ?? "0",
+    volume: d?.quoteVolume         ?? "0",
+  };
 }
 
 // ── Coin detail — full metadata + current price from Redis ────────────────────
