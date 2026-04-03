@@ -86,15 +86,9 @@ const nextConfig = {
       {
         source: "/api/:path*",
         headers: [
-          {
-            key: "Access-Control-Allow-Origin",
-            // Wildcard in dev, locked to your actual domains in prod
-            value: process.env.NODE_ENV === "production"
-              ? (process.env.NEXT_PUBLIC_APP_URL ?? "https://kryptoke-mu.vercel.app")
-              : "*",
-          },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, PATCH, DELETE, OPTIONS" },
           { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, X-Sweep-Secret, X-Cron-Secret" },
+          { key: "Access-Control-Allow-Credentials", value: "true" },
           { key: "Access-Control-Max-Age",       value: "86400" },
         ],
       },

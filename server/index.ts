@@ -27,13 +27,20 @@ const app = new Hono().basePath("/api/v1");
 /* ─── CORS ──────────────────────────────────────────────────────────────── */
 app.use("*", cors({
   origin: (origin) => {
-    const allowed = process.env.NODE_ENV === "production"
-      ? ["https://kryptoke.com", "https://www.kryptoke.com"]
-      : ["http://localhost:3000", "http://localhost:3001"];
-    return allowed.includes(origin ?? "") ? origin : null;
+    if (!origin) return null; // non-browser requests (cron, server-to-server)
+    const allowed = [
+      "https://kryptoke.com",
+      "https://www.kryptoke.com",
+      "https://kryptoke-mu.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:3001",
+    ];
+    // Allow any vercel preview deployment for this project
+    if (origin.endsWith(".vercel.app") && origin.includes("kryptoke")) return origin;
+    return allowed.includes(origin) ? origin : null;
   },
   allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowHeaders: ["Content-Type", "Authorization", "X-Sweep-Secret"],
+  allowHeaders: ["Content-Type", "Authorization", "X-Sweep-Secret", "X-Cron-Secret"],
   maxAge: 86400,
   credentials: true,
 }));
