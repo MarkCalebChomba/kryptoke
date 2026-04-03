@@ -1002,7 +1002,7 @@ market.get("/home", authMiddleware, async (c) => {
   const cacheKeyPrefix = "market:home";
 
   // Fear & Greed — served from existing cache
-  const fearGreed = await redis.get(CacheKeys.fearGreed());
+  let fearGreed = await redis.get<{ value: number; classification: string; timestamp: string | null }>(CacheKeys.fearGreed());
 
   // Fear & Greed 30-day history for the curve
   const db = getDb();
@@ -1011,6 +1011,16 @@ market.get("/home", authMiddleware, async (c) => {
     .select("date, value, label")
     .order("date", { ascending: true })
     .limit(30);
+
+  // If Redis cache is cold, populate from DB history
+  if (!fearGreed && fgHistory && fgHistory.length > 0) {
+    const latest = fgHistory[fgHistory.length - 1];
+    if (latest) {
+      fearGreed = { value: latest.value, classification: latest.label, timestamp: null };
+      // Re-seed Redis so next call is fast
+      redis.set(CacheKeys.fearGreed(), fearGreed, { ex: 60 * 60 }).catch(() => undefined);
+    }
+  }
 
   // Get price blob
   const priceRaw = await redis.get<string>("market:prices");
