@@ -248,14 +248,14 @@ export default function MarketsPage() {
   }, [page]);
 
   const enrichedCoins = useMemo(() =>
-    coins.map((c) => {
+    (coins ?? []).map((c) => {
       const live = livePrices[c.symbol];
       return live ? { ...c, price: live.price ?? c.price } : c;
     }),
   [coins, livePrices]);
 
   const displayCoins = useMemo(() => {
-    let list = enrichedCoins;
+    let list = enrichedCoins ?? [];
     if (activeTab === "Favourites") list = list.filter((c) => isFavorite(c.symbol));
     if (activeTab === "All") {
       list = [...list].sort((a, b) => {

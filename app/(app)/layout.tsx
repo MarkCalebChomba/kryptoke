@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAppStore } from "@/lib/store";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { Skeleton } from "@/components/shared/Skeleton";
@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isAuthenticated, isLoadingAuth } = useAppStore((s) => ({
     isAuthenticated: s.isAuthenticated,
     isLoadingAuth: s.isLoadingAuth,
@@ -39,7 +40,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative w-full h-dvh overflow-hidden bg-bg" suppressHydrationWarning>
       <main className="absolute inset-0 overflow-hidden">
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
       </main>
       <BottomNav />
     </div>
