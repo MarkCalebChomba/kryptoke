@@ -309,9 +309,9 @@ export default function HomePage() {
       <div className="h-24" />
 
       {/* Sheets */}
-      <NotificationsSheet open={notifOpen} onClose={() => setNotifOpen(false)} />
-      <MenuSheet open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <DepositSheet open={depositOpen} onClose={() => setDepositOpen(false)} />
+      <NotificationsSheet isOpen={notifOpen} onClose={() => setNotifOpen(false)} />
+      <MenuSheet isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
+      <DepositSheet isOpen={depositOpen} onClose={() => setDepositOpen(false)} />
     </div>
   );
 }

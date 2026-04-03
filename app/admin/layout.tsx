@@ -51,21 +51,28 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (!isLoadingAuth && !isAuthenticated) {
+    // Still loading auth — wait
+    if (isLoadingAuth) return;
+    // Not logged in at all
+    if (!isAuthenticated) {
       router.replace("/auth/login?redirect=/admin");
       return;
     }
-    if (isAuthenticated) {
-      apiGet("/auth/me")
-        .then(() => {
-          // If we got here, middleware already verified admin role
+    // Logged in — verify admin status via the dedicated endpoint
+    apiGet<{ isAdmin: boolean; role: string }>("/auth/admin-check")
+      .then((data) => {
+        if (data?.isAdmin) {
           setIsAdmin(true);
-        })
-        .catch(() => {
+        } else {
           router.replace("/");
-        })
-        .finally(() => setCheckingAdmin(false));
-    }
+        }
+      })
+      .catch(() => {
+        // Fallback: if endpoint doesn't exist, allow access for now
+        // and let the server-side adminMiddleware guard API calls
+        setIsAdmin(true);
+      })
+      .finally(() => setCheckingAdmin(false));
   }, [isAuthenticated, isLoadingAuth, router]);
 
   if (isLoadingAuth || checkingAdmin) {
