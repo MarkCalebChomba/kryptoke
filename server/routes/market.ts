@@ -796,7 +796,32 @@ market.get("/coins", authMiddleware, async (c) => {
   const { data: tokens, error } = await query;
 
   if (error) {
-    return c.json({ success: false, error: "Failed to load coins", statusCode: 500 }, 500);
+    // DB error (e.g. schema mismatch, table missing) — fall back to static coin list with Redis prices
+    console.error("[market/coins] DB error, falling back to static list:", error.message);
+    const staticCoins = Object.entries(KNOWN_COINS)
+      .filter(([sym]) => !search || sym.includes(search) || KNOWN_COINS[sym]?.name.toUpperCase().includes(search))
+      .map(([sym, info]) => {
+        const p = prices[sym];
+        return {
+          symbol: sym, name: info.name,
+          logo_url: CMC_LOGO(info.cmcId), cmc_rank: info.rank,
+          chain_ids: [] as string[], is_depositable: false,
+          price:      p?.price      ?? "0",
+          change_24h: p?.change_24h ?? "0",
+          change_1h:  p?.change_1h  ?? "0",
+          volume_24h: p?.volume_24h ?? "0",
+          high_24h:   p?.high_24h   ?? "0",
+          low_24h:    p?.low_24h    ?? "0",
+          source: p ? "coingecko" : "static",
+        };
+      })
+      .sort((a, b) => parseFloat(b.volume_24h) - parseFloat(a.volume_24h) || a.cmc_rank - b.cmc_rank)
+      .slice(offset, offset + limit);
+    return c.json({
+      success: true,
+      data: staticCoins,
+      meta: { page, limit, total: Object.keys(KNOWN_COINS).length, tab, chain: null, source: "static_fallback" },
+    });
   }
 
   const hasTokens = (tokens ?? []).length > 0;
