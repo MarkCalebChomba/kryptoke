@@ -801,23 +801,35 @@ market.get("/coins", authMiddleware, async (c) => {
 
   const hasTokens = (tokens ?? []).length > 0;
 
-  // ── If no tokens in DB — use KNOWN_COINS static list (never calls blocked Binance)
+  // ── If no tokens in DB — use KNOWN_COINS static list merged with Redis prices
   if (!hasTokens) {
     const staticCoins = Object.entries(KNOWN_COINS)
       .filter(([sym]) => !search || sym.includes(search) || KNOWN_COINS[sym]?.name.toUpperCase().includes(search))
-      .map(([sym, info]) => ({
-        symbol: sym, name: info.name,
-        logo_url: CMC_LOGO(info.cmcId), cmc_rank: info.rank,
-        chain_ids: [] as string[], is_depositable: false,
-        price: "0", change_24h: "0", change_1h: "0",
-        volume_24h: "0", high_24h: "0", low_24h: "0", source: "static",
-      }))
-      .sort((a, b) => a.cmc_rank - b.cmc_rank)
+      .map(([sym, info]) => {
+        const p = prices[sym]; // merge with Redis prices if available
+        return {
+          symbol: sym, name: info.name,
+          logo_url: CMC_LOGO(info.cmcId), cmc_rank: info.rank,
+          chain_ids: [] as string[], is_depositable: false,
+          price:      p?.price      ?? "0",
+          change_24h: p?.change_24h ?? "0",
+          change_1h:  p?.change_1h  ?? "0",
+          volume_24h: p?.volume_24h ?? "0",
+          high_24h:   p?.high_24h   ?? "0",
+          low_24h:    p?.low_24h    ?? "0",
+          source: p ? "coingecko" : "static",
+        };
+      })
+      .sort((a, b) => {
+        // Sort by volume if we have prices, otherwise by rank
+        if (a.volume_24h !== "0") return parseFloat(b.volume_24h) - parseFloat(a.volume_24h);
+        return a.cmc_rank - b.cmc_rank;
+      })
       .slice(offset, offset + limit);
     return c.json({
       success: true,
       data: staticCoins,
-      meta: { page, limit, total: Object.keys(KNOWN_COINS).length, tab, chain: null, source: "static_fallback" },
+      meta: { page, limit, total: Object.keys(KNOWN_COINS).length, tab, chain: null, source: staticCoins[0]?.source === "coingecko" ? "redis_prices" : "static_fallback" },
     });
   }
 
@@ -844,24 +856,32 @@ market.get("/coins", authMiddleware, async (c) => {
     })
     .filter(Boolean) as NonNullable<ReturnType<typeof Array.prototype.map>>[];
 
-  // ── If merged is still empty (tokens exist but no prices matched yet)
-  // Return tokens without price data rather than calling blocked Binance API from server
+  // ── If merged is still empty (tokens exist but no prices matched by symbol yet)
+  // Try a case-insensitive match, then fall back to showing tokens with price:0
   if (merged.length === 0) {
-    const noPriceFallback = (tokens ?? []).map((t) => ({
-      symbol:         t.symbol,
-      name:           t.name,
-      logo_url:       t.logo_url,
-      cmc_rank:       t.cmc_rank,
-      chain_ids:      t.chain_ids,
-      is_depositable: t.is_depositable,
-      price:          "0",
-      change_24h:     "0",
-      change_1h:      "0",
-      volume_24h:     "0",
-      high_24h:       "0",
-      low_24h:        "0",
-      source:         "pending",
-    })).slice(offset, offset + limit);
+    // Build a case-insensitive prices lookup
+    const pricesUpper: typeof prices = {};
+    for (const [k, v] of Object.entries(prices)) {
+      pricesUpper[k.toUpperCase()] = v;
+    }
+    const noPriceFallback = (tokens ?? []).map((t) => {
+      const p = pricesUpper[t.symbol.toUpperCase()];
+      return {
+        symbol:         t.symbol,
+        name:           t.name,
+        logo_url:       t.logo_url,
+        cmc_rank:       t.cmc_rank,
+        chain_ids:      t.chain_ids,
+        is_depositable: t.is_depositable,
+        price:          p?.price      ?? "0",
+        change_24h:     p?.change_24h ?? "0",
+        change_1h:      p?.change_1h  ?? "0",
+        volume_24h:     p?.volume_24h ?? "0",
+        high_24h:       p?.high_24h   ?? "0",
+        low_24h:        p?.low_24h    ?? "0",
+        source:         p ? "coingecko" : "pending",
+      };
+    }).slice(offset, offset + limit);
     return c.json({
       success: true,
       data: noPriceFallback,
