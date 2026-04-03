@@ -151,11 +151,11 @@ export default function TokenDetailPage() {
           </div>
 
           {/* Multi-period returns table */}
-          {returns && (
+          {Array.isArray(returns) && returns.length > 0 && (
             <div className="px-4 py-3 border-b border-border">
               <p className="font-outfit text-xs text-text-muted uppercase tracking-wide mb-2">Returns</p>
               <div className="grid grid-cols-6 gap-1">
-                {returns.map(({ label, change: ret }) => {
+                {(returns as Array<{ label: string; change: string | null }>).map(({ label, change: ret }) => {
                   const retDir = priceDirection(ret ?? "0");
                   return (
                     <div key={label} className="text-center">

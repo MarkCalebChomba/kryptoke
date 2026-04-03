@@ -259,10 +259,12 @@ export default function MarketsPage() {
     if (activeTab === "Favourites") list = list.filter((c) => isFavorite(c.symbol));
     if (activeTab === "All") {
       list = [...list].sort((a, b) => {
-        const val = (x: Coin) =>
-          sortKey === "volume" ? parseFloat(x.volume_24h) :
-          sortKey === "price"  ? parseFloat(x.price) :
-          parseFloat(x.change_24h);
+        const val = (x: Coin) => {
+          const v = sortKey === "volume" ? parseFloat(x.volume_24h)
+            : sortKey === "price"  ? parseFloat(x.price)
+            : parseFloat(x.change_24h);
+          return isNaN(v) ? 0 : v;
+        };
         return sortDir === "desc" ? val(b) - val(a) : val(a) - val(b);
       });
     }
@@ -364,6 +366,14 @@ export default function MarketsPage() {
         </div>
       ) : (
         <>
+          {/* Show banner when prices are zero (cron not yet seeded) */}
+          {displayCoins[0]?.price === "0" && displayCoins[0]?.volume_24h === "0" && (
+            <div className="mx-4 my-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
+              <p className="font-outfit text-[11px] text-primary text-center">
+                Live prices updating — please wait a moment
+              </p>
+            </div>
+          )}
           {displayCoins.map((coin) => (
             <CoinRow key={coin.symbol} {...coin}
               showChange={showChange}
