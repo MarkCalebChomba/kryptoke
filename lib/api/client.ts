@@ -76,7 +76,11 @@ apiClient.interceptors.response.use(
       if (status === 401) {
         clearStoredToken();
         if (typeof window !== "undefined") {
-          window.location.href = "/auth/login";
+          // Don't redirect if already on auth pages or admin — avoid redirect loops
+          const path = window.location.pathname;
+          if (!path.startsWith("/auth") && !path.startsWith("/admin")) {
+            window.location.href = "/auth/login";
+          }
         }
         return Promise.reject(
           new ApiClientError("Session expired. Please log in again.", 401)

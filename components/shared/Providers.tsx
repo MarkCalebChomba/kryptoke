@@ -70,7 +70,16 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
         setUser(user, token);
       })
       .catch(() => {
-        clearAuth();
+        // On /admin routes, don't clear auth on failure — the token may be
+        // valid but the API call failed for another reason (network, CORS etc.)
+        // The admin layout renders regardless; API calls will fail gracefully.
+        const isAdmin = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
+        if (!isAdmin) {
+          clearAuth();
+        } else {
+          // Still set loading to false so the admin layout can render
+          setLoadingAuth(false);
+        }
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
