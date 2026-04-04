@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import { useAuth } from "@/lib/store";
+import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils/cn";
 import { IconKryptoKeLogo } from "@/components/icons";
+import { useAuth } from "@/lib/store";
 
 const NAV_ITEMS = [
   { label: "Dashboard",     href: "/admin",               icon: "📊" },
@@ -42,35 +42,12 @@ function SidebarItem({ label, href, icon, active, onClick }: {
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isLoadingAuth, user } = useAuth();
+  const { user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [ready, setReady] = useState(false);
 
-  useEffect(() => {
-    if (isLoadingAuth) return;
-
-    if (!isAuthenticated || !user) {
-      router.replace("/auth/login?redirect=/admin");
-      return;
-    }
-
-    // Allow access — server-side adminMiddleware guards individual API calls
-    // In production you'd verify admin role here, but the DB check is done server-side
-    setReady(true);
-  }, [isAuthenticated, isLoadingAuth, user, router]);
-
-  if (!ready) {
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          <p className="font-outfit text-sm text-text-muted">Loading admin panel…</p>
-        </div>
-      </div>
-    );
-  }
+  // No redirect logic — admin API calls are protected server-side by adminMiddleware.
+  // If a non-admin hits /admin, all data fetches will return 403 and pages show empty.
 
   return (
     <div className="min-h-screen bg-bg flex">
@@ -103,7 +80,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
             <div className="min-w-0">
               <p className="font-outfit text-xs text-text-primary truncate">
-                {user?.displayName ?? user?.email}
+                {user?.displayName ?? user?.email ?? "Admin"}
               </p>
               <p className="font-outfit text-[10px] text-text-muted">Super Admin</p>
             </div>
