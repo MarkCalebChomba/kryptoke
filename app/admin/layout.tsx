@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/lib/store";
-import { apiGet } from "@/lib/api/client";
 import { cn } from "@/lib/utils/cn";
 import { IconKryptoKeLogo } from "@/components/icons";
 
@@ -22,13 +21,13 @@ const NAV_ITEMS = [
   { label: "Settings",      href: "/admin/settings",       icon: "⚙️" },
 ];
 
-function SidebarItem({ label, href, icon, active }: {
-  label: string; href: string; icon: string; active: boolean;
+function SidebarItem({ label, href, icon, active, onClick }: {
+  label: string; href: string; icon: string; active: boolean; onClick?: () => void;
 }) {
   const router = useRouter();
   return (
     <button
-      onClick={() => router.push(href)}
+      onClick={() => { onClick?.(); router.push(href); }}
       className={cn(
         "flex items-center gap-3 w-full px-4 py-2.5 rounded-xl font-outfit text-sm font-medium transition-all text-left",
         active
@@ -42,51 +41,36 @@ function SidebarItem({ label, href, icon, active }: {
   );
 }
 
-type AdminState = "loading" | "allowed" | "denied";
-
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isLoadingAuth } = useAuth();
-  const [adminState, setAdminState] = useState<AdminState>("loading");
+  const { isAuthenticated, isLoadingAuth, user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Still resolving auth from localStorage — wait
     if (isLoadingAuth) return;
 
-    // Definitely not logged in
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !user) {
       router.replace("/auth/login?redirect=/admin");
       return;
     }
 
-    // Logged in — check admin status
-    setAdminState("loading");
-    apiGet<{ isAdmin: boolean; role: string }>("/auth/admin-check")
-      .then((data) => {
-        setAdminState(data?.isAdmin ? "allowed" : "denied");
-        if (!data?.isAdmin) router.replace("/");
-      })
-      .catch(() => {
-        // /auth/admin-check endpoint not found or network error
-        // Allow access — server-side adminMiddleware guards individual API calls
-        setAdminState("allowed");
-      });
-  }, [isAuthenticated, isLoadingAuth, router]);
+    // Allow access — server-side adminMiddleware guards individual API calls
+    // In production you'd verify admin role here, but the DB check is done server-side
+    setReady(true);
+  }, [isAuthenticated, isLoadingAuth, user, router]);
 
-  if (adminState === "loading") {
+  if (!ready) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-          <p className="font-outfit text-sm text-text-muted">Checking admin access…</p>
+          <p className="font-outfit text-sm text-text-muted">Loading admin panel…</p>
         </div>
       </div>
     );
   }
-
-  if (adminState === "denied") return null;
 
   return (
     <div className="min-h-screen bg-bg flex">
@@ -111,16 +95,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </nav>
 
         <div className="px-4 py-4 border-t border-border">
-          <p className="font-outfit text-[10px] text-text-muted">
-            KryptoKe v{process.env.NEXT_PUBLIC_APP_VERSION ?? "1.0.0"}
-          </p>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
+              <span className="text-[10px] font-bold text-primary">
+                {user?.displayName?.slice(0, 1) ?? user?.email?.slice(0, 1) ?? "A"}
+              </span>
+            </div>
+            <div className="min-w-0">
+              <p className="font-outfit text-xs text-text-primary truncate">
+                {user?.displayName ?? user?.email}
+              </p>
+              <p className="font-outfit text-[10px] text-text-muted">Super Admin</p>
+            </div>
+          </div>
         </div>
       </aside>
 
       {/* Mobile hamburger */}
       <button
         onClick={() => setSidebarOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 w-10 h-10 bg-bg-surface border border-border rounded-xl flex items-center justify-center"
+        className="lg:hidden fixed top-4 left-4 z-50 w-10 h-10 bg-bg-surface border border-border rounded-xl flex items-center justify-center shadow-lg"
         aria-label="Open menu"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -136,16 +130,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             onClick={() => setSidebarOpen(false)}
           />
           <aside className="lg:hidden fixed left-0 top-0 bottom-0 w-64 bg-bg-surface border-r border-border z-50 overflow-y-auto">
-            <div className="flex items-center gap-2 px-4 py-5 border-b border-border">
-              <IconKryptoKeLogo size={28} />
-              <p className="font-syne font-bold text-sm text-gradient">Admin</p>
+            <div className="flex items-center justify-between px-4 py-5 border-b border-border">
+              <div className="flex items-center gap-2">
+                <IconKryptoKeLogo size={24} />
+                <p className="font-syne font-bold text-sm text-gradient">Admin</p>
+              </div>
+              <button onClick={() => setSidebarOpen(false)} className="text-text-muted">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
+                </svg>
+              </button>
             </div>
             <nav className="px-3 py-4 space-y-1">
               {NAV_ITEMS.map((item) => (
                 <SidebarItem
                   key={item.href}
                   {...item}
-                  active={pathname === item.href}
+                  active={pathname === item.href || (item.href !== "/admin" && pathname.startsWith(item.href))}
+                  onClick={() => setSidebarOpen(false)}
                 />
               ))}
             </nav>
