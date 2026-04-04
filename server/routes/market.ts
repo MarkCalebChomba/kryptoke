@@ -56,7 +56,26 @@ market.get("/price/:tokenAddress", async (c) => {
   return c.json({ success: true, data: { tokenAddress, price, kesPrice } });
 });
 
-/* ─── GET /candles/:tokenAddress ── Bug #6 fix: fallback when Graph deprecated */
+/* ─── GET /candles/:tokenAddress ─────────────────────────────────────────── */
+
+// Shared CoinGecko ID map
+const CG_ID_MAP: Record<string, string> = {
+  BTC: "bitcoin", ETH: "ethereum", USDT: "tether", BNB: "binancecoin",
+  SOL: "solana", USDC: "usd-coin", XRP: "ripple", DOGE: "dogecoin",
+  TRX: "tron", ADA: "cardano", AVAX: "avalanche-2", SHIB: "shiba-inu",
+  LINK: "chainlink", DOT: "polkadot", TON: "the-open-network",
+  MATIC: "matic-network", LTC: "litecoin", BCH: "bitcoin-cash",
+  UNI: "uniswap", NEAR: "near", ATOM: "cosmos", XLM: "stellar",
+  APT: "aptos", ARB: "arbitrum", OP: "optimism", HBAR: "hedera-hashgraph",
+  AAVE: "aave", MKR: "maker", GRT: "the-graph", DAI: "dai",
+  CRV: "curve-dao-token", LDO: "lido-dao", SAND: "the-sandbox",
+  MANA: "decentraland", ALGO: "algorand", VET: "vechain", FIL: "filecoin",
+  THETA: "theta-token", AXS: "axie-infinity", KAVA: "kava", ROSE: "oasis-network",
+};
+
+const CG_INTERVAL_DAYS: Record<string, number> = {
+  "15m": 1, "1h": 1, "hour": 1, "4h": 7, "1d": 30, "day": 30, "1D": 30, "1W": 90,
+};
 
 market.get("/candles/:tokenAddress", async (c) => {
   const { tokenAddress } = c.req.param();
@@ -68,43 +87,64 @@ market.get("/candles/:tokenAddress", async (c) => {
     "4h": "4h", "day": "1d", "1D": "1d", "1W": "1w", "3m": "3m",
   };
   const binanceInterval = binanceIntervalMap[interval] ?? "1h";
+  const cleanSym = tokenAddress.toUpperCase().replace(/USDT$/, "");
+  const binanceSym = `${cleanSym}USDT`;
 
-  // Strategy 1: tokenAddress already looks like a Binance symbol (e.g. "DOGEUSDT", "BTCUSDT")
-  const looksLikeBinanceSymbol = /^[A-Z0-9]{2,10}USDT$/.test(tokenAddress.toUpperCase());
-  if (looksLikeBinanceSymbol) {
+  // Strategy 1: Binance (fast but blocked on Vercel iad1 — try anyway)
+  try {
+    const candles = await fetchBinanceCandles(binanceSym, binanceInterval, limit);
+    if (candles.length > 0) return c.json({ success: true, data: candles, source: "binance" });
+  } catch { /* fall through */ }
+
+  // Strategy 2: CoinGecko OHLC — works on Vercel
+  const cgId = CG_ID_MAP[cleanSym];
+  if (cgId) {
     try {
-      const candles = await fetchBinanceCandles(tokenAddress.toUpperCase(), binanceInterval, limit);
-      if (candles.length > 0) return c.json({ success: true, data: candles, source: "binance" });
+      const days = CG_INTERVAL_DAYS[interval] ?? 1;
+      const cgRes = await fetch(
+        `https://api.coingecko.com/api/v3/coins/${cgId}/ohlc?vs_currency=usd&days=${days}`,
+        { signal: AbortSignal.timeout(10000) }
+      );
+      if (cgRes.ok) {
+        const raw = await cgRes.json() as Array<[number, number, number, number, number]>;
+        const candles: OHLCV[] = raw.slice(-limit).map(([ts, o, h, l, cl]) => ({
+          time: Math.floor(ts / 1000),
+          open: o.toString(), high: h.toString(),
+          low: l.toString(), close: cl.toString(), volume: "0",
+        }));
+        if (candles.length > 0) return c.json({ success: true, data: candles, source: "coingecko" });
+      }
     } catch { /* fall through */ }
   }
 
-  // Strategy 2: tokenAddress is a plain symbol without USDT suffix (e.g. "DOGE", "BTC")
-  const asUsdtPair = `${tokenAddress.toUpperCase()}USDT`;
-  if (!looksLikeBinanceSymbol) {
-    try {
-      const candles = await fetchBinanceCandles(asUsdtPair, binanceInterval, limit);
-      if (candles.length > 0) return c.json({ success: true, data: candles, source: "binance" });
-    } catch { /* fall through */ }
-  }
-
-  // Strategy 3: Look up symbol from DB by address
+  // Strategy 3: look up symbol from DB by address then try CoinGecko
   const db = getDb();
-  const { data: token } = await db
-    .from("tokens")
-    .select("symbol")
-    .eq("address", tokenAddress)
-    .maybeSingle();
-
+  const { data: token } = await db.from("tokens").select("symbol").eq("address", tokenAddress).maybeSingle();
   if (token?.symbol) {
-    try {
-      const candles = await fetchBinanceCandles(`${token.symbol}USDT`, binanceInterval, limit);
-      if (candles.length > 0) return c.json({ success: true, data: candles, source: "binance" });
-    } catch { /* fall through */ }
+    const dbCgId = CG_ID_MAP[token.symbol.toUpperCase()];
+    if (dbCgId) {
+      try {
+        const days = CG_INTERVAL_DAYS[interval] ?? 1;
+        const r = await fetch(
+          `https://api.coingecko.com/api/v3/coins/${dbCgId}/ohlc?vs_currency=usd&days=${days}`,
+          { signal: AbortSignal.timeout(10000) }
+        );
+        if (r.ok) {
+          const raw = await r.json() as Array<[number, number, number, number, number]>;
+          const candles: OHLCV[] = raw.slice(-limit).map(([ts, o, h, l, cl]) => ({
+            time: Math.floor(ts / 1000),
+            open: o.toString(), high: h.toString(),
+            low: l.toString(), close: cl.toString(), volume: "0",
+          }));
+          if (candles.length > 0) return c.json({ success: true, data: candles, source: "coingecko" });
+        }
+      } catch { /* fall through */ }
+    }
   }
 
-  // Final fallback: empty (no on-chain trade data for this token)
   return c.json({ success: true, data: [], source: "empty" });
 });
+
 
 async function fetchBinanceCandles(
   symbol: string,

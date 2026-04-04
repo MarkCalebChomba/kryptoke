@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "@/lib/api/client";
 import { useToastActions } from "@/components/shared/ToastContainer";
 import { BottomSheet } from "@/components/shared/BottomSheet";
+import { ChartSection } from "@/components/trade/ChartSection";
 import { usePrices } from "@/lib/store";
 import { sanitizeNumberInput } from "@/lib/utils/formatters";
 import { cn } from "@/lib/utils/cn";
@@ -42,7 +43,9 @@ interface FuturesSummary {
 
 /* ─── Open Position Sheet ────────────────────────────────────────────────── */
 
-function OpenPositionSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+function OpenPositionSheet({ isOpen, onClose, onSymbolChange }: {
+  isOpen: boolean; onClose: () => void; onSymbolChange?: (s: string) => void;
+}) {
   const toast = useToastActions();
   const qc = useQueryClient();
   const { prices } = usePrices();
@@ -50,6 +53,7 @@ function OpenPositionSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () =
   const POPULAR = ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "DOT"];
 
   const [symbol, setSymbol] = useState("BTC");
+  function handleSymbol(s: string) { setSymbol(s); onSymbolChange?.(s); }
   const [side, setSide] = useState<"long" | "short">("long");
   const [leverage, setLeverage] = useState(10);
   const [margin, setMargin] = useState("");
@@ -99,7 +103,7 @@ function OpenPositionSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () =
           <label className="block font-outfit text-xs text-text-secondary mb-1.5">Asset</label>
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
             {POPULAR.map((s) => (
-              <button key={s} onClick={() => setSymbol(s)}
+              <button key={s} onClick={() => handleSymbol(s)}
                 className={cn("flex-shrink-0 px-3 py-1.5 rounded-lg font-outfit text-xs font-semibold border transition-all",
                   symbol === s ? "bg-primary/15 border-primary/40 text-primary" : "border-border text-text-muted")}>
                 {s}
@@ -285,6 +289,7 @@ export function FuturesTab() {
   const toast = useToastActions();
   const qc = useQueryClient();
   const [openSheet, setOpenSheet] = useState(false);
+  const [chartSymbol, setChartSymbol] = useState("BTC");
 
   const { data: summary, isLoading } = useQuery({
     queryKey: ["futures", "summary"],
@@ -305,7 +310,11 @@ export function FuturesTab() {
   const todayPnl = parseFloat(summary?.todayPnl ?? "0");
 
   return (
-    <div className="space-y-4 px-4 pt-4 pb-8">
+    <div className="pb-8">
+      {/* Chart — synced with the symbol in OpenPositionSheet */}
+      <ChartSection symbol={chartSymbol} tokenAddress={`${chartSymbol}USDT`} />
+
+      <div className="space-y-4 px-4 pt-4">
       {/* Account summary */}
       <div className="card">
         <p className="font-outfit text-xs text-text-muted mb-3">Futures Account</p>
@@ -352,7 +361,8 @@ export function FuturesTab() {
         </div>
       )}
 
-      <OpenPositionSheet isOpen={openSheet} onClose={() => setOpenSheet(false)} />
+      <OpenPositionSheet isOpen={openSheet} onClose={() => setOpenSheet(false)} onSymbolChange={setChartSymbol} />
+      </div>
     </div>
   );
 }

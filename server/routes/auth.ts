@@ -948,4 +948,13 @@ auth.delete("/whitelist/:id", authMiddleware, async (c) => {
   return c.json({ success: true, data: { deleted: id } });
 });
 
+/* ─── GET /admin-check — verify caller is an admin ──────────────────────── */
+
+auth.get("/admin-check", authMiddleware, async (c) => {
+  const { uid } = c.get("user");
+  const { isAdminUser } = await import("@/server/db/users");
+  const isAdmin = await isAdminUser(uid);
+  return c.json({ success: true, data: { isAdmin } });
+});
+
 export default auth;

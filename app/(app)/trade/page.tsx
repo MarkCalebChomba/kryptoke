@@ -182,6 +182,7 @@ export default function TradePage() {
                 dir === "up" ? "text-up" : dir === "down" ? "text-down" : "text-text-secondary")}>
                 {formatPrice(price)}
               </span>
+              <span className="font-outfit text-xs text-text-muted">{kesPrice}</span>
               <span className={cn("font-price text-xs",
                 dir === "up" ? "text-up" : dir === "down" ? "text-down" : "text-text-muted")}>
                 {formatChange(change)}
@@ -189,11 +190,7 @@ export default function TradePage() {
             </div>
           </div>
         </button>
-
-        <div className="flex items-center gap-2">
-          <span className="font-outfit text-xs text-text-muted">{kesPrice}</span>
-          <TradeModeButton activeMode={activeMode} onChange={handleModeChange} />
-        </div>
+        <TradeModeButton activeMode={activeMode} onChange={handleModeChange} />
       </div>
 
       {/* Content */}

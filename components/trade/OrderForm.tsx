@@ -37,6 +37,9 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormPro
   const [orderType, setOrderType] = useState<OrderType>("limit");
   const [price, setPrice] = useState("");
   const [amount, setAmount] = useState("");
+  const [tpPrice, setTpPrice] = useState("");
+  const [slPrice, setSlPrice] = useState("");
+  const [triggerPrice, setTriggerPrice] = useState("");
   const [sliderPct, setSliderPct] = useState(0);
   const [orderTypeSheetOpen, setOrderTypeSheetOpen] = useState(false);
   const [confirmSheetOpen, setConfirmSheetOpen] = useState(false);
@@ -77,8 +80,14 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormPro
   }, [livePrice]);
 
   async function handleSubmit() {
+    // For market orders use live price, for others use typed price
+    const effectivePrice = orderType === "market" ? livePrice : price;
+    const effectiveTotal = effectivePrice && amount
+      ? multiply(effectivePrice, amount)
+      : total;
+
     const { valid, error } = validateAmount(
-      total || "0",
+      effectiveTotal || "0",
       "0.0001",
       available,
       available
@@ -91,7 +100,7 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormPro
 
     const tokenIn = side === "buy" ? "USDT" : tokenAddress;
     const tokenOut = side === "buy" ? tokenAddress : "USDT";
-    const amountIn = side === "buy" ? total : amount;
+    const amountIn = side === "buy" ? effectiveTotal : amount;
 
     // Get quote first
     quoteQuery.mutate(
@@ -135,7 +144,9 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormPro
 
   const isBuy = side === "buy";
   const submitDisabled =
-    !price || !amount || parseFloat(amount) <= 0 || quoteQuery.isPending;
+    (orderType !== "market" && !price) ||
+    !amount || parseFloat(amount) <= 0 ||
+    quoteQuery.isPending;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -172,27 +183,36 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormPro
         <IconChevronDown size={16} className="text-text-muted" />
       </button>
 
-      {/* Price input */}
-      <div>
-        <label className="block font-outfit text-xs text-text-muted mb-1.5">
-          Price (USDT)
-        </label>
-        <div className="relative">
-          <input
-            type="text" inputMode="decimal"
-            value={price}
-            onChange={(e) => setPrice(sanitizeNumberInput(e.target.value))}
-            className="input-field font-price pr-16"
-            placeholder={formatPrice(livePrice)}
-          />
-          <button
-            onClick={handleBbo}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-primary font-outfit text-xs font-semibold bg-primary/10 px-2 py-1 rounded-lg"
-          >
-            BBO
-          </button>
+      {/* Price input — hidden for market orders */}
+      {orderType !== "market" && (
+        <div>
+          <label className="block font-outfit text-xs text-text-muted mb-1.5">
+            {orderType === "tp_sl" ? "Limit Price (USDT)" : "Price (USDT)"}
+          </label>
+          <div className="relative">
+            <input
+              type="text" inputMode="decimal"
+              value={price}
+              onChange={(e) => setPrice(sanitizeNumberInput(e.target.value))}
+              className="input-field font-price pr-16"
+              placeholder={formatPrice(livePrice)}
+            />
+            <button
+              onClick={handleBbo}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-primary font-outfit text-xs font-semibold bg-primary/10 px-2 py-1 rounded-lg"
+            >
+              BBO
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {orderType === "market" && (
+        <div className="px-3 py-2.5 rounded-xl bg-bg-surface2 border border-border">
+          <p className="font-outfit text-xs text-text-muted">Market price</p>
+          <p className="font-price text-sm text-text-primary">{formatPrice(livePrice)} USDT</p>
+        </div>
+      )}
 
       {/* Amount input */}
       <div>
@@ -210,6 +230,48 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormPro
           placeholder="0.0000"
         />
       </div>
+
+      {/* Trigger price — for trigger and trailing_stop order types */}
+      {(orderType === "trigger" || orderType === "trailing_stop") && (
+        <div>
+          <label className="block font-outfit text-xs text-text-muted mb-1.5">
+            {orderType === "trailing_stop" ? "Callback Rate (%)" : "Trigger Price (USDT)"}
+          </label>
+          <input
+            type="text" inputMode="decimal"
+            value={triggerPrice}
+            onChange={(e) => setTriggerPrice(sanitizeNumberInput(e.target.value))}
+            className="input-field font-price"
+            placeholder={orderType === "trailing_stop" ? "e.g. 1.5" : formatPrice(livePrice)}
+          />
+        </div>
+      )}
+
+      {/* TP / SL fields */}
+      {orderType === "tp_sl" && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block font-outfit text-xs text-up mb-1.5">Take Profit</label>
+            <input
+              type="text" inputMode="decimal"
+              value={tpPrice}
+              onChange={(e) => setTpPrice(sanitizeNumberInput(e.target.value))}
+              className="input-field font-price border-up/30 focus:border-up/60"
+              placeholder="TP price"
+            />
+          </div>
+          <div>
+            <label className="block font-outfit text-xs text-down mb-1.5">Stop Loss</label>
+            <input
+              type="text" inputMode="decimal"
+              value={slPrice}
+              onChange={(e) => setSlPrice(sanitizeNumberInput(e.target.value))}
+              className="input-field font-price border-down/30 focus:border-down/60"
+              placeholder="SL price"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Percentage slider */}
       <div>
