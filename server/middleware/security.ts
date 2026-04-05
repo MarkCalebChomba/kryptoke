@@ -123,20 +123,23 @@ export async function safaricomIpGuard(c: Context, next: Next): Promise<Response
     return;
   }
 
+  const xForwardedFor = c.req.header("x-forwarded-for") ?? "";
   const clientIp =
     c.req.header("cf-connecting-ip") ??
-    c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+    c.req.header("x-real-ip") ??
+    xForwardedFor.split(",")[0]?.trim() ??
     "";
 
-  if (!SAFARICOM_IP_RANGES.includes(clientIp)) {
-    import("@sentry/nextjs").then(({ captureMessage }) => {
-      captureMessage(`M-Pesa callback from unauthorized IP: ${clientIp}`, {
-        level: "warning",
-        extra: { clientIp, path: new URL(c.req.url).pathname },
-      });
-    }).catch(() => undefined);
+  console.log(`[safaricomIpGuard] callback from IP: ${clientIp}`);
 
-    // Always return 200 to Safaricom — never reveal rejection
+  if (!SAFARICOM_IP_RANGES.includes(clientIp)) {
+    // In sandbox mode, allow all IPs — sandbox callbacks come from non-Safaricom IPs
+    const isSandbox = process.env.MPESA_ENVIRONMENT !== "production";
+    if (isSandbox) {
+      console.warn(`[safaricomIpGuard] Sandbox — allowing callback from: ${clientIp}`);
+      await next();
+      return;
+    }
     return c.json({ ResultCode: 0, ResultDesc: "Accepted" });
   }
 
