@@ -957,4 +957,47 @@ auth.get("/admin-check", authMiddleware, async (c) => {
   return c.json({ success: true, data: { isAdmin } });
 });
 
+/* ─── POST /admin-session — set httpOnly admin cookie ───────────────────── */
+// Called by /admin/login after verifying the user is an admin.
+// Sets a secure httpOnly cookie so Next.js edge middleware can verify it.
+
+auth.post("/admin-session", authMiddleware, async (c) => {
+  const { uid } = c.get("user");
+  const { isAdminUser } = await import("@/server/db/users");
+  const isAdmin = await isAdminUser(uid);
+
+  if (!isAdmin) {
+    return c.json({ success: false, error: "Not an admin", statusCode: 403 }, 403);
+  }
+
+  // Get the raw token from Authorization header to set as cookie
+  const authHeader = c.req.header("Authorization") ?? "";
+  const token = authHeader.replace(/^Bearer\s+/i, "");
+
+  if (!token) {
+    return c.json({ success: false, error: "No token provided", statusCode: 400 }, 400);
+  }
+
+  const isProd = process.env.NODE_ENV === "production";
+  const cookieOptions = [
+    `kryptoke_admin=${token}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Strict",
+    "Max-Age=604800", // 7 days
+    ...(isProd ? ["Secure"] : []),
+  ].join("; ");
+
+  return new Response(
+    JSON.stringify({ success: true, data: { ok: true } }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Set-Cookie": cookieOptions,
+      },
+    }
+  );
+});
+
 export default auth;
