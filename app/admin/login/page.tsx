@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function AdminLoginPage() {
+function AdminLoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") ?? "/admin/dashboard";
@@ -17,9 +17,7 @@ export default function AdminLoginPage() {
     if (!email || !password) return;
     setLoading(true);
     setError("");
-
     try {
-      // 1. Log in to get JWT
       const loginRes = await fetch("/api/v1/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -29,9 +27,8 @@ export default function AdminLoginPage() {
       if (!loginRes.ok || !loginData.data?.accessToken) {
         throw new Error(loginData.error ?? "Login failed");
       }
-      const { accessToken, user } = loginData.data;
+      const { accessToken } = loginData.data;
 
-      // 2. Check admin status
       const adminRes = await fetch("/api/v1/auth/admin-check", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -40,10 +37,12 @@ export default function AdminLoginPage() {
         throw new Error("This account does not have admin access");
       }
 
-      // 3. Set httpOnly admin cookie via dedicated endpoint
       const cookieRes = await fetch("/api/v1/auth/admin-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ token: accessToken }),
       });
       if (!cookieRes.ok) throw new Error("Failed to create admin session");
@@ -62,8 +61,8 @@ export default function AdminLoginPage() {
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor" strokeWidth="1.75" className="text-primary"/>
-              <path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" className="text-primary"/>
+              <rect x="3" y="11" width="18" height="11" rx="2" stroke="#00E5B4" strokeWidth="1.75"/>
+              <path d="M7 11V7a5 5 0 0110 0v4" stroke="#00E5B4" strokeWidth="1.75" strokeLinecap="round"/>
             </svg>
           </div>
           <div>
@@ -112,5 +111,17 @@ export default function AdminLoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AdminLoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-bg flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <AdminLoginForm />
+    </Suspense>
   );
 }
