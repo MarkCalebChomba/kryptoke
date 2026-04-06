@@ -199,8 +199,7 @@ export default function HomePage() {
         totalKes={totalKes}
         totalUsd={totalUsd}
         isLoading={walletLoading}
-        onDeposit={() => setDepositOpen(true)}
-        onWithdraw={() => router.push("/withdraw")}
+
       />
 
       {/* Quick actions + Fear & Greed in one row */}
@@ -232,7 +231,7 @@ export default function HomePage() {
               </svg>
             }
             label="Transfer" color="text-primary" bg="bg-primary/10"
-            onClick={() => router.push("/assets")}
+            onClick={() => router.push("/me")}
           />
         </div>
 
