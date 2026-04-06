@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { TopBar } from "@/components/shared/TopBar";
 import { AssetRow } from "@/components/assets/AssetRow";
@@ -7,7 +8,8 @@ import { SkeletonCoinRow } from "@/components/shared/Skeleton";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { usePrices } from "@/lib/store";
 import { formatKes } from "@/lib/utils/formatters";
-import { IconDeposit, IconSend, IconTransfer } from "@/components/icons";
+import { IconDeposit, IconSend, IconTransfer, IconWithdraw } from "@/components/icons";
+import { DepositSheet } from "@/components/home/DepositSheet";
 
 const KNOWN_ASSETS = [
   { symbol: "USDT", name: "Tether USD", iconUrl: null },
@@ -18,6 +20,7 @@ const KNOWN_ASSETS = [
 
 export default function AssetsPage() {
   const router = useRouter();
+  const [depositOpen, setDepositOpen] = useState(false);
   const { totalKes, totalUsd, kesBalance, usdtBalance, bnbBalance, rate, isLoading } = useWallet();
   const { prices, priceChanges } = usePrices();
   const kesPerUsd = rate?.kesPerUsd ?? "130";
@@ -46,14 +49,15 @@ export default function AssetsPage() {
       {/* Action row */}
       <div className="flex gap-3 px-4 py-3">
         {[
-          { icon: IconDeposit, label: "Add Funds", action: () => router.push("/") },
-          { icon: IconSend,    label: "Send",      action: () => router.push("/") },
-          { icon: IconTransfer,label: "Transfer",  action: () => router.push("/") },
-        ].map(({ icon: Icon, label, action }) => (
+          { icon: IconDeposit,  label: "Deposit",  color: "text-up",      action: () => setDepositOpen(true) },
+          { icon: IconWithdraw, label: "Withdraw", color: "text-down",    action: () => router.push("/withdraw") },
+          { icon: IconTransfer, label: "Transfer", color: "text-primary", action: () => router.push("/me") },
+          { icon: IconSend,     label: "Send",     color: "text-gold",    action: () => router.push("/me") },
+        ].map(({ icon: Icon, label, color, action }) => (
           <button key={label} onClick={action}
             className="flex-1 flex flex-col items-center gap-1.5 py-3 rounded-xl bg-bg-surface2 border border-border active:scale-95 transition-transform">
-            <Icon size={18} className="text-text-secondary" />
-            <span className="font-outfit text-xs text-text-muted">{label}</span>
+            <Icon size={18} className={color} />
+            <span className={`font-outfit text-xs font-semibold ${color}`}>{label}</span>
           </button>
         ))}
       </div>
@@ -97,6 +101,7 @@ export default function AssetsPage() {
           </div>
         )}
       </div>
+      <DepositSheet isOpen={depositOpen} onClose={() => setDepositOpen(false)} />
     </div>
   );
 }
