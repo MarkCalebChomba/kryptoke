@@ -16,6 +16,8 @@ import {
   IconDeposit, IconWithdraw, IconTransfer, IconSend,
   IconChevronRight, IconCopy, IconEye, IconEyeOff,
 } from "@/components/icons";
+import { priceDirection } from "@/lib/utils/formatters";
+import type { DailyPnl } from "@/types";
 import type { Balance } from "@/types";
 import Big from "big.js";
 
@@ -202,6 +204,18 @@ export default function WalletPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { totalKes, totalUsd, kesBalance, usdtBalance, bnbBalance, rate, isLoading } = useWallet();
+
+  const { data: dailyPnl } = useQuery({
+    queryKey: ["analytics", "daily-pnl"],
+    queryFn: () => apiGet<DailyPnl[]>("/analytics/daily-pnl"),
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: historyData } = useQuery({
+    queryKey: ["wallet", "history-me", 1],
+    queryFn: () => apiGet<{ transactions: Array<{ id: string; asset: string; amount: string; type: string; note: string; created_at: string }>; hasMore: boolean }>("/wallet/history?limit=20"),
+    staleTime: 30_000,
+  });
   const { prices, priceChanges } = usePrices();
   const [hidden, setHidden] = useState(false);
   const [internalOpen, setInternalOpen] = useState(false);
@@ -351,6 +365,63 @@ export default function WalletPage() {
               </button>
             );
           })
+        )}
+      </div>
+
+      {/* Analysis section */}
+      <div className="border-t border-border mt-4 pt-4">
+        <div className="flex items-center justify-between px-4 mb-2">
+          <p className="font-syne font-semibold text-sm text-text-primary">Analysis</p>
+          <button onClick={() => router.push("/analysis")}
+            className="font-outfit text-xs text-primary">View full</button>
+        </div>
+        <PnlCalendar data={dailyPnl ?? []} />
+      </div>
+
+      {/* Transaction history */}
+      <div className="border-t border-border mt-4 pt-4">
+        <div className="flex items-center justify-between px-4 mb-2">
+          <p className="font-syne font-semibold text-sm text-text-primary">Recent Transactions</p>
+        </div>
+        {!historyData ? (
+          <div className="px-4 space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="skeleton h-12 rounded-xl" />
+            ))}
+          </div>
+        ) : historyData.transactions.length === 0 ? (
+          <p className="text-center text-text-muted font-outfit text-sm py-6">No transactions yet</p>
+        ) : (
+          <div className="divide-y divide-border/40">
+            {historyData.transactions.map((tx) => {
+              const amt = parseFloat(tx.amount);
+              const isPositive = amt >= 0;
+              return (
+                <div key={tx.id} className="flex items-center gap-3 px-4 py-3">
+                  <div className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm",
+                    isPositive ? "bg-up/15 text-up" : "bg-down/15 text-down"
+                  )}>
+                    {isPositive ? "↑" : "↓"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-outfit text-sm text-text-primary capitalize truncate">
+                      {tx.type.replace(/_/g, " ")}
+                    </p>
+                    <p className="font-outfit text-[10px] text-text-muted truncate">{tx.note || "—"}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className={cn("font-price text-sm font-semibold", isPositive ? "text-up" : "text-down")}>
+                      {isPositive ? "+" : ""}{amt.toFixed(4)} {tx.asset}
+                    </p>
+                    <p className="font-outfit text-[10px] text-text-muted">
+                      {new Date(tx.created_at).toLocaleDateString("en-KE", { month: "short", day: "numeric" })}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
