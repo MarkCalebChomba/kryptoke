@@ -335,3 +335,65 @@ export function parseB2cResult(body: unknown): B2cResultData | null {
     return null;
   }
 }
+
+/* ─── STK Query — check payment status directly from Safaricom ─────────── */
+
+export interface StkQueryResult {
+  resultCode: number;
+  resultDesc: string;
+  mpesaReceiptNumber: string | null;
+}
+
+export async function queryStkStatus(checkoutRequestId: string): Promise<StkQueryResult> {
+  const token = await getMpesaToken();
+  const paybill = process.env.MPESA_PAYBILL;
+  const passkey = process.env.MPESA_PASSKEY;
+
+  if (!paybill || !passkey) {
+    throw new Error("MPESA_PAYBILL and MPESA_PASSKEY must be set");
+  }
+
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-T:.Z]/g, "")
+    .slice(0, 14);
+  const password = Buffer.from(`${paybill}${passkey}${timestamp}`).toString("base64");
+
+  const res = await fetch(`${DARAJA_BASE}/mpesa/stkpushquery/v1/query`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      BusinessShortCode: paybill,
+      Password: password,
+      Timestamp: timestamp,
+      CheckoutRequestID: checkoutRequestId,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`STK query failed: ${res.status} ${text}`);
+  }
+
+  const data = (await res.json()) as {
+    ResultCode?: string | number;
+    ResultDesc?: string;
+    CallbackMetadata?: {
+      Item?: Array<{ Name: string; Value?: unknown }>;
+    };
+  };
+
+  const resultCode = Number(data.ResultCode ?? -1);
+  const getItem = (key: string) =>
+    data.CallbackMetadata?.Item?.find((i) => i.Name === key)?.Value ?? null;
+
+  return {
+    resultCode,
+    resultDesc: data.ResultDesc ?? "",
+    mpesaReceiptNumber: getItem("MpesaReceiptNumber") as string | null,
+  };
+}

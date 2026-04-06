@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { label: "Chains",        href: "/admin/chains",         icon: "🔗" },
   { label: "Coins",         href: "/admin/coins",          icon: "🪙" },
   { label: "System Health", href: "/admin/health",         icon: "🔧" },
+  { label: "Support",       href: "/admin/support",        icon: "🎫" },
   { label: "Feedback",      href: "/admin/feedback",       icon: "💬" },
   { label: "Announcements", href: "/admin/announcements",  icon: "📢" },
   { label: "Events",        href: "/admin/events",         icon: "📅" },

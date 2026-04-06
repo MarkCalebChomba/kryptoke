@@ -21,6 +21,7 @@ import earnRoutes from "./routes/earn";
 import analyticsRoutes from "./routes/analytics";
 import futuresRoutes from "./routes/futures";
 import adminRoutes from "./routes/admin/index";
+import supportRoutes from "./routes/support";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -122,6 +123,7 @@ app.route("/tokens", tokenRoutes);
 app.route("/notifications", notificationRoutes);
 app.route("/earn", earnRoutes);
 app.route("/analytics", analyticsRoutes);
+app.route("/support", supportRoutes);
 app.route("/admin", adminRoutes);
 app.route("/", feedbackRoutes);
 

@@ -19,6 +19,7 @@ type DepositView =
   | "processing"    // STK push in flight
   | "success"       // M-Pesa success
   | "failed"        // M-Pesa failed
+  | "raise_ticket"  // support ticket form
   | "crypto_token"  // choose token (USDT, BTC, SOL, etc.)
   | "crypto_chain"  // choose blockchain for that token
   | "crypto_address"; // show address + QR
@@ -94,6 +95,9 @@ export function DepositSheet({ isOpen, onClose }: DepositSheetProps) {
   const [amount, setAmount] = useState("");
   const [selectedToken, setSelectedToken] = useState("USDT");
   const [selectedChainId, setSelectedChainId] = useState("");
+  const [ticketDesc, setTicketDesc] = useState("");
+  const [ticketSubmitting, setTicketSubmitting] = useState(false);
+  const [ticketDone, setTicketDone] = useState(false);
   const { user } = useAuth();
   const toast = useToastActions();
   const deposit = useMpesaDeposit();
@@ -276,11 +280,98 @@ export function DepositSheet({ isOpen, onClose }: DepositSheetProps) {
             </div>
             <h3 className="font-syne font-bold text-lg text-text-primary mb-2">Payment not completed</h3>
             <p className="font-outfit text-sm text-text-muted mb-6 leading-relaxed">
-              The M-Pesa payment was not completed. No funds were deducted.
+              The M-Pesa payment was not completed. No funds were deducted from your account.
             </p>
-            <button onClick={() => { deposit.reset(); setView("mpesa"); }} className="btn-primary max-w-xs w-full">
+            <button onClick={() => { deposit.reset(); setView("mpesa"); }} className="btn-primary max-w-xs w-full mb-3">
               Try Again
             </button>
+            {deposit.txId && (
+              <button
+                onClick={() => setView("raise_ticket" as DepositView)}
+                className="max-w-xs w-full py-3 rounded-xl border border-border font-outfit text-sm text-text-secondary active:bg-bg-surface2 transition-colors"
+              >
+                Payment was deducted? Raise a ticket
+              </button>
+            )}
+          </div>
+        )}
+
+        {view === "raise_ticket" && (
+          <div className="px-4 py-6">
+            <div className="flex items-center gap-2 mb-5">
+              <button onClick={() => setView("failed")} className="tap-target -ml-1 text-text-muted">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <h2 className="font-syne font-bold text-base text-text-primary">Raise a Ticket</h2>
+            </div>
+
+            {ticketDone ? (
+              <div className="text-center py-8">
+                <div className="w-14 h-14 rounded-full bg-up/10 border border-up/30 flex items-center justify-center mx-auto mb-4">
+                  <IconCheck size={24} className="text-up" />
+                </div>
+                <p className="font-syne font-bold text-base text-text-primary mb-1">Ticket Submitted</p>
+                <p className="font-outfit text-sm text-text-muted mb-6">Our team will review your case and respond within 24 hours.</p>
+                <button onClick={() => { deposit.reset(); setView("method"); setTicketDone(false); setTicketDesc(""); }} className="btn-primary w-full max-w-xs">
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="px-3 py-2.5 rounded-xl bg-gold/5 border border-gold/20">
+                  <p className="font-outfit text-xs text-gold">
+                    Only raise a ticket if money was deducted from your M-Pesa but your balance didn't update.
+                    We'll verify and credit you within 24 hours.
+                  </p>
+                </div>
+
+                <div className="px-3 py-2 rounded-xl bg-bg-surface2 border border-border">
+                  <p className="font-outfit text-xs text-text-muted mb-0.5">Transaction reference</p>
+                  <p className="font-price text-xs text-text-secondary">{deposit.txId}</p>
+                </div>
+
+                <div>
+                  <label className="block font-outfit text-xs text-text-muted mb-1.5">
+                    Describe what happened <span className="text-down">*</span>
+                  </label>
+                  <textarea
+                    value={ticketDesc}
+                    onChange={(e) => setTicketDesc(e.target.value)}
+                    rows={4}
+                    maxLength={500}
+                    placeholder="e.g. KSh 1000 was deducted from my M-Pesa (07XXXXXXXX) at 10:15 PM but my balance wasn't updated..."
+                    className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border font-outfit text-sm text-text-primary outline-none focus:border-primary transition-colors resize-none"
+                  />
+                  <p className="font-outfit text-[10px] text-text-muted text-right mt-0.5">{ticketDesc.length}/500</p>
+                </div>
+
+                <button
+                  disabled={ticketDesc.length < 20 || ticketSubmitting}
+                  onClick={async () => {
+                    setTicketSubmitting(true);
+                    try {
+                      const { apiPost: post } = await import("@/lib/api/client");
+                      await post("/support/tickets", {
+                        type: "deposit",
+                        reference_id: deposit.txId,
+                        subject: `Failed M-Pesa deposit - ${deposit.txId?.slice(0,8)}`,
+                        description: ticketDesc,
+                      });
+                      setTicketDone(true);
+                    } catch (err) {
+                      toast.error("Failed to submit ticket", err instanceof Error ? err.message : "");
+                    } finally {
+                      setTicketSubmitting(false);
+                    }
+                  }}
+                  className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {ticketSubmitting ? "Submitting…" : "Submit Ticket"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 

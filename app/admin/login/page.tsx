@@ -2,22 +2,27 @@
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useAppStore } from "@/lib/store";
+import { clearStoredToken } from "@/lib/api/client";
 
 function AdminLoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") ?? "/admin/dashboard";
+  const clearAuth = useAppStore((s) => s.clearAuth);
 
-  const [email, setEmail] = useState("");
+  const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
 
   async function handleLogin() {
     if (!email || !password) return;
     setLoading(true);
     setError("");
+
     try {
+      // 1. Log in
       const loginRes = await fetch("/api/v1/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -29,14 +34,21 @@ function AdminLoginForm() {
       }
       const { accessToken } = loginData.data;
 
+      // 2. Check admin status
       const adminRes = await fetch("/api/v1/auth/admin-check", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const adminData = await adminRes.json();
+
       if (!adminRes.ok || !adminData.data?.isAdmin) {
-        throw new Error("This account does not have admin access");
+        // NOT an admin — log them out of the main app completely and show warning
+        clearAuth();
+        clearStoredToken();
+        setError("This account does not have admin access. You have been logged out for security.");
+        return;
       }
 
+      // 3. Set httpOnly admin cookie
       const cookieRes = await fetch("/api/v1/auth/admin-session", {
         method: "POST",
         headers: {
@@ -49,7 +61,9 @@ function AdminLoginForm() {
 
       router.replace(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      if (!(err instanceof Error) || !err.message.includes("admin access")) {
+        setError(err instanceof Error ? err.message : "Login failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -67,12 +81,16 @@ function AdminLoginForm() {
           </div>
           <div>
             <h1 className="font-syne font-bold text-base text-text-primary">Admin Access</h1>
-            <p className="font-outfit text-xs text-text-muted">KryptoKe Dashboard</p>
+            <p className="font-outfit text-xs text-text-muted">KryptoKe Dashboard — Restricted</p>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 px-3 py-2.5 rounded-xl bg-down/10 border border-down/20">
+          <div className="mb-4 px-3 py-2.5 rounded-xl bg-down/10 border border-down/20 flex items-start gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-down mt-0.5 flex-shrink-0">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.75"/>
+              <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
+            </svg>
             <p className="font-outfit text-sm text-down">{error}</p>
           </div>
         )}
@@ -81,20 +99,17 @@ function AdminLoginForm() {
           <div>
             <label className="block font-outfit text-xs text-text-muted mb-1.5">Email</label>
             <input
-              type="email"
-              value={email}
+              type="email" value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
               className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border font-outfit text-sm text-text-primary outline-none focus:border-primary transition-colors"
-              placeholder="admin@kryptoke.com"
-              autoFocus
+              placeholder="admin@kryptoke.com" autoFocus
             />
           </div>
           <div>
             <label className="block font-outfit text-xs text-text-muted mb-1.5">Password</label>
             <input
-              type="password"
-              value={password}
+              type="password" value={password}
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleLogin()}
               className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border font-outfit text-sm text-text-primary outline-none focus:border-primary transition-colors"
