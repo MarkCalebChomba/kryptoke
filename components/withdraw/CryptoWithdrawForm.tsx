@@ -146,6 +146,13 @@ export function CryptoWithdrawForm({ initialToken, onSuccess }: CryptoWithdrawFo
   const [view, setView] = useState<WithdrawView>(
     initialToken ? "crypto_chain" : "method_select"
   );
+
+  // Check fund password
+  const { data: secStatus } = useQuery({
+    queryKey: ["security", "status"],
+    queryFn: () => apiGet<{ fundPasswordSet: boolean }>("/account/security-status"),
+    staleTime: 60_000,
+  });
   const [selectedToken, setSelectedToken]   = useState(initialToken ?? "");
   const [selectedChainId, setSelectedChainId] = useState("");
   const [toAddress, setToAddress]           = useState("");
