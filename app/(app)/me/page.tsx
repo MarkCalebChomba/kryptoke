@@ -21,6 +21,45 @@ import type { DailyPnl } from "@/types";
 import type { Balance } from "@/types";
 import Big from "big.js";
 
+// ─── PnL Calendar ────────────────────────────────────────────────────────────
+function PnlCalendar({ data }: { data: DailyPnl[] }) {
+  const today = new Date().toISOString().split("T")[0];
+  const byDate = new Map(data.map((d) => [d.date, d]));
+  const days = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (29 - i));
+    return d.toISOString().split("T")[0] as string;
+  });
+  return (
+    <div className="px-4">
+      <p className="font-outfit text-xs text-text-muted uppercase tracking-wide mb-1.5">Daily PnL — Last 30 days</p>
+      <div className="grid grid-cols-7 gap-0.5">
+        {["S","M","T","W","T","F","S"].map((d, i) => (
+          <p key={i} className="font-outfit text-[8px] text-text-muted text-center pb-0.5">{d}</p>
+        ))}
+        {days.map((date) => {
+          const entry = byDate.get(date);
+          const pnl = parseFloat(entry?.pnlUsd ?? "0");
+          const isToday = date === today;
+          const dir = priceDirection(pnl.toString());
+          return (
+            <div key={date} title={`${date}: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USDT`}
+              className={cn(
+                "h-6 rounded flex items-center justify-center text-[9px] font-price",
+                isToday && "ring-1 ring-primary",
+                dir === "up" ? "bg-up/25 text-up" :
+                dir === "down" ? "bg-down/25 text-down" :
+                "bg-bg-surface2 text-text-muted"
+              )}>
+              {new Date(date + "T00:00:00").getDate()}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Internal transfer sheet ────────────────────────────────────────────────
 function InternalTransferSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const toast = useToastActions();
@@ -205,6 +244,12 @@ export default function WalletPage() {
   const { user } = useAuth();
   const { totalKes, totalUsd, kesBalance, usdtBalance, bnbBalance, rate, isLoading } = useWallet();
 
+  // Read ?highlight=<txId> from notification deep-link
+  const searchParams = typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search)
+    : null;
+  const highlightId = searchParams?.get("highlight") ?? null;
+
   const { data: dailyPnl } = useQuery({
     queryKey: ["analytics", "daily-pnl"],
     queryFn: () => apiGet<DailyPnl[]>("/analytics/daily-pnl"),
@@ -213,11 +258,12 @@ export default function WalletPage() {
 
   const { data: historyData } = useQuery({
     queryKey: ["wallet", "history-me", 1],
-    queryFn: () => apiGet<{ transactions: Array<{ id: string; asset: string; amount: string; type: string; note: string; created_at: string }>; hasMore: boolean }>("/wallet/history?limit=20"),
+    queryFn: () => apiGet<{ transactions: Array<{ id: string; asset: string; amount: string; type: string; note: string; reference_id: string | null; created_at: string }>; hasMore: boolean }>("/wallet/history?limit=20"),
     staleTime: 30_000,
   });
   const { prices, priceChanges } = usePrices();
   const [hidden, setHidden] = useState(false);
+  const [expandedTx, setExpandedTx] = useState<string | null>(highlightId);
   const [internalOpen, setInternalOpen] = useState(false);
   const [p2pOpen, setP2pOpen] = useState(false);
   const toast = useToastActions();
@@ -396,28 +442,94 @@ export default function WalletPage() {
             {historyData.transactions.map((tx) => {
               const amt = parseFloat(tx.amount);
               const isPositive = amt >= 0;
+              const isExpanded = expandedTx === tx.id;
+              const isHighlighted = highlightId === tx.id;
+              const txDate = new Date(tx.created_at);
               return (
-                <div key={tx.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className={cn(
-                    "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm",
-                    isPositive ? "bg-up/15 text-up" : "bg-down/15 text-down"
-                  )}>
-                    {isPositive ? "↑" : "↓"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-outfit text-sm text-text-primary capitalize truncate">
-                      {tx.type.replace(/_/g, " ")}
-                    </p>
-                    <p className="font-outfit text-[10px] text-text-muted truncate">{tx.note || "—"}</p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className={cn("font-price text-sm font-semibold", isPositive ? "text-up" : "text-down")}>
-                      {isPositive ? "+" : ""}{amt.toFixed(4)} {tx.asset}
-                    </p>
-                    <p className="font-outfit text-[10px] text-text-muted">
-                      {new Date(tx.created_at).toLocaleDateString("en-KE", { month: "short", day: "numeric" })}
-                    </p>
-                  </div>
+                <div
+                  key={tx.id}
+                  className={cn(
+                    "transition-colors",
+                    isHighlighted && "bg-primary/5 ring-1 ring-primary/20 rounded-xl mx-2"
+                  )}
+                >
+                  {/* Main row — tappable to expand */}
+                  <button
+                    onClick={() => setExpandedTx(isExpanded ? null : tx.id)}
+                    className="flex items-center gap-3 px-4 py-3 w-full active:bg-bg-surface2 transition-colors"
+                  >
+                    <div className={cn(
+                      "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm",
+                      isPositive ? "bg-up/15 text-up" : "bg-down/15 text-down"
+                    )}>
+                      {isPositive ? "↑" : "↓"}
+                    </div>
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="font-outfit text-sm text-text-primary capitalize truncate">
+                        {tx.type.replace(/_/g, " ")}
+                      </p>
+                      <p className="font-outfit text-[10px] text-text-muted truncate">{tx.note || "—"}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0 flex items-center gap-2">
+                      <div>
+                        <p className={cn("font-price text-sm font-semibold", isPositive ? "text-up" : "text-down")}>
+                          {isPositive ? "+" : ""}{amt.toFixed(4)} {tx.asset}
+                        </p>
+                        <p className="font-outfit text-[10px] text-text-muted">
+                          {txDate.toLocaleDateString("en-KE", { month: "short", day: "numeric" })}
+                        </p>
+                      </div>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        className={cn("text-text-muted transition-transform", isExpanded && "rotate-90")}>
+                        <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                  </button>
+
+                  {/* Expanded details */}
+                  {isExpanded && (
+                    <div className="mx-4 mb-3 px-3 py-3 rounded-xl bg-bg-surface2 border border-border space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Type</p>
+                          <p className="font-outfit text-xs text-text-primary capitalize mt-0.5">{tx.type.replace(/_/g, " ")}</p>
+                        </div>
+                        <div>
+                          <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Asset</p>
+                          <p className="font-price text-xs text-text-primary mt-0.5">{tx.asset}</p>
+                        </div>
+                        <div>
+                          <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Amount</p>
+                          <p className={cn("font-price text-xs font-semibold mt-0.5", isPositive ? "text-up" : "text-down")}>
+                            {isPositive ? "+" : ""}{amt.toFixed(6)} {tx.asset}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Date & Time</p>
+                          <p className="font-outfit text-xs text-text-primary mt-0.5">
+                            {txDate.toLocaleDateString("en-KE", { day: "2-digit", month: "short", year: "numeric" })}
+                            {" "}{txDate.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                      </div>
+                      {tx.note && (
+                        <div>
+                          <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Note</p>
+                          <p className="font-outfit text-xs text-text-secondary mt-0.5 leading-relaxed">{tx.note}</p>
+                        </div>
+                      )}
+                      {tx.reference_id && (
+                        <div>
+                          <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Reference ID</p>
+                          <p className="font-price text-[10px] text-text-muted mt-0.5 break-all">{tx.reference_id}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Transaction ID</p>
+                        <p className="font-price text-[10px] text-text-muted mt-0.5 break-all">{tx.id}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
