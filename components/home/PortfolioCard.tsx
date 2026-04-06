@@ -12,8 +12,6 @@ interface PortfolioCardProps {
   todayPnl?: string;
   sparklineData?: number[];
   isLoading: boolean;
-  onDeposit: () => void;
-  onWithdraw: () => void;
 }
 
 function Sparkline({ data, positive }: { data: number[]; positive: boolean }) {
@@ -34,7 +32,7 @@ function Sparkline({ data, positive }: { data: number[]; positive: boolean }) {
 }
 
 export function PortfolioCard({ totalKes, totalUsd, todayPnl = "0", sparklineData = [],
-  isLoading, onDeposit, onWithdraw }: PortfolioCardProps) {
+  isLoading }: PortfolioCardProps) {
   const [hidden, setHidden] = useState(false);
   if (isLoading) return <SkeletonPortfolioCard />;
 
@@ -72,17 +70,7 @@ export function PortfolioCard({ totalKes, totalUsd, todayPnl = "0", sparklineDat
         </div>
       </div>
 
-      {/* Action row */}
-      <div className="flex gap-2 mt-3">
-        <button onClick={onDeposit}
-          className="flex-1 py-2 rounded-xl bg-primary text-bg font-outfit font-semibold text-sm active:opacity-85 transition-opacity">
-          Deposit
-        </button>
-        <button onClick={onWithdraw}
-          className="flex-1 py-2 rounded-xl border border-border text-text-secondary font-outfit font-semibold text-sm active:bg-bg-surface2 transition-colors">
-          Withdraw
-        </button>
-      </div>
+
     </div>
   );
 }
