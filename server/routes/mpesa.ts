@@ -320,7 +320,146 @@ mpesa.get(
   }
 );
 
-/* ─── GET /history ──────────────────────────────────────────────────────── */
+/* ─── POST /manual-confirm — user submits their M-Pesa code manually ────── */
+// Used when STK callback was missed and user has the receipt in their SMS.
+// Anti-double-entry: mpesa_code is unique across all completed deposits.
+
+mpesa.post(
+  "/manual-confirm",
+  authMiddleware,
+  withSensitiveRateLimit(),
+  zValidator("json", z.object({
+    txId:      z.string().uuid(),
+    mpesaCode: z.string().min(6).max(30).regex(/^[A-Z0-9]+$/i, "Invalid M-Pesa code format"),
+  })),
+  async (c) => {
+    const { uid } = c.get("user");
+    const { txId, mpesaCode } = c.req.valid("json");
+    const code = mpesaCode.toUpperCase().trim();
+    const db = getDb();
+
+    // 1. Fetch the deposit — must belong to this user and be in processing/failed
+    const { data: deposit, error } = await db
+      .from("deposits")
+      .select("*")
+      .eq("id", txId)
+      .eq("uid", uid)
+      .single();
+
+    if (error || !deposit) {
+      return c.json({ success: false, error: "Deposit not found", statusCode: 404 }, 404);
+    }
+
+    if (deposit.status === "completed") {
+      return c.json({ success: false, error: "This deposit has already been completed", statusCode: 400 }, 400);
+    }
+
+    if (!["processing", "failed", "pending"].includes(deposit.status)) {
+      return c.json({ success: false, error: "Deposit cannot be manually confirmed in its current state", statusCode: 400 }, 400);
+    }
+
+    // 2. Anti-double-entry: check if this M-Pesa code was already used by ANYONE
+    const { data: existingDeposit } = await db
+      .from("deposits")
+      .select("id, uid, status")
+      .eq("mpesa_code", code)
+      .eq("status", "completed")
+      .maybeSingle();
+
+    if (existingDeposit) {
+      logDepositPhase(deposit.id, uid, "manual_confirm_rejected", {
+        reason: "duplicate_mpesa_code",
+        code,
+        conflicting_deposit: existingDeposit.id,
+      });
+      return c.json({
+        success: false,
+        error: "This M-Pesa transaction code has already been used. If you believe this is an error, please contact support.",
+        statusCode: 400,
+      }, 400);
+    }
+
+    // 3. Check deposit age — only allow manual confirm within 24 hours
+    const ageHours = (Date.now() - new Date(deposit.created_at).getTime()) / 3_600_000;
+    if (ageHours > 24) {
+      return c.json({
+        success: false,
+        error: "Manual confirmation is only available within 24 hours of initiating a deposit. Please contact support.",
+        statusCode: 400,
+      }, 400);
+    }
+
+    // 4. Mark as pending admin review — don't auto-credit, a cron/admin will verify
+    //    This prevents instant fraud while still helping legit users
+    await db.from("deposits").update({
+      status: "processing",
+      mpesa_code: code,
+    }).eq("id", deposit.id);
+
+    logDepositPhase(deposit.id, uid, "manual_code_submitted", {
+      mpesa_code: code,
+      previous_status: deposit.status,
+    });
+
+    // 5. Try to verify via STK Query immediately — if payment is real, confirm now
+    if (deposit.checkout_request_id) {
+      try {
+        const queryResult = await queryStkStatus(deposit.checkout_request_id);
+        if (queryResult.resultCode === 0) {
+          // Safaricom confirms payment — credit immediately
+          const kesPerUsd = deposit.kes_per_usd ?? "130";
+          const amountKes = deposit.amount_kes;
+          const usdtToCredit = new Big(amountKes).div(new Big(kesPerUsd)).toFixed(6);
+          const currentBalance = await getBalance(uid, "USDT", "funding");
+          const newBalance = add(currentBalance, usdtToCredit);
+
+          await upsertBalance(uid, "USDT", newBalance, "funding");
+          await createLedgerEntry({
+            uid, asset: "USDT", amount: usdtToCredit, type: "deposit",
+            reference_id: deposit.id,
+            note: `M-Pesa deposit KSh ${amountKes} @ ${kesPerUsd} KES/USD (manual confirm + STK verified)`,
+          });
+          await db.from("deposits").update({
+            status: "completed",
+            usdt_credited: usdtToCredit,
+            mpesa_code: queryResult.mpesaReceiptNumber ?? code,
+            completed_at: new Date().toISOString(),
+          }).eq("id", deposit.id);
+
+          logDepositPhase(deposit.id, uid, "completed", {
+            source: "manual_confirm_stk_verified",
+            mpesa_code: queryResult.mpesaReceiptNumber ?? code,
+          });
+
+          await Notifications.depositConfirmed(uid, amountKes, toFixed(parseFloat(usdtToCredit), 2), deposit.id);
+
+          return c.json({
+            success: true,
+            data: { status: "completed", usdtCredited: usdtToCredit, mpesaCode: queryResult.mpesaReceiptNumber ?? code },
+          });
+        }
+      } catch { /* STK query failed — fall through to pending review */ }
+    }
+
+    // 6. Could not auto-verify — flag for admin review, raise a support ticket automatically
+    await db.from("support_tickets").insert({
+      uid,
+      type: "deposit",
+      reference_id: deposit.id,
+      subject: `Manual M-Pesa code submitted - ${code}`,
+      description: `User submitted M-Pesa code ${code} for deposit ${deposit.id} (KSh ${deposit.amount_kes}). STK query could not auto-verify. Requires manual review and credit if valid.`,
+      priority: "high",
+    }).catch(() => { /* non-blocking */ });
+
+    return c.json({
+      success: true,
+      data: {
+        status: "pending_review",
+        message: "Your M-Pesa code has been submitted for review. We'll verify and credit your account within 30 minutes.",
+      },
+    });
+  }
+);
 
 mpesa.get(
   "/history",

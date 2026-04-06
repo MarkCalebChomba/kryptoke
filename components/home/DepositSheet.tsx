@@ -14,15 +14,17 @@ import { cn } from "@/lib/utils/cn";
 import { useQuery } from "@tanstack/react-query";
 
 type DepositView =
-  | "method"        // choose M-Pesa vs Crypto
-  | "mpesa"         // M-Pesa amount entry
-  | "processing"    // STK push in flight
-  | "success"       // M-Pesa success
-  | "failed"        // M-Pesa failed
-  | "raise_ticket"  // support ticket form
-  | "crypto_token"  // choose token (USDT, BTC, SOL, etc.)
-  | "crypto_chain"  // choose blockchain for that token
-  | "crypto_address"; // show address + QR
+  | "method"
+  | "mpesa"
+  | "processing"
+  | "success"
+  | "failed"
+  | "manual_code"
+  | "pending_review"
+  | "raise_ticket"
+  | "crypto_token"
+  | "crypto_chain"
+  | "crypto_address";
 
 const QUICK_AMOUNTS = [500, 1000, 5000, 10000];
 
@@ -98,6 +100,9 @@ export function DepositSheet({ isOpen, onClose }: DepositSheetProps) {
   const [ticketDesc, setTicketDesc] = useState("");
   const [ticketSubmitting, setTicketSubmitting] = useState(false);
   const [ticketDone, setTicketDone] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualError, setManualError] = useState("");
   const { user } = useAuth();
   const toast = useToastActions();
   const deposit = useMpesaDeposit();
@@ -241,14 +246,112 @@ export function DepositSheet({ isOpen, onClose }: DepositSheetProps) {
 
         {/* ── STK Processing ── */}
         {view === "processing" && (
-          <div className="px-4 py-10 flex flex-col items-center text-center">
+          <div className="px-4 py-8 flex flex-col items-center text-center">
             <div className="w-16 h-16 rounded-full bg-mpesa/10 border border-mpesa/30 flex items-center justify-center mb-5">
               <div className="w-8 h-8 border-2 border-mpesa border-t-transparent rounded-full animate-spin" />
             </div>
             <h3 className="font-syne font-bold text-lg text-text-primary mb-2">Waiting for payment</h3>
-            <p className="font-outfit text-sm text-text-muted leading-relaxed max-w-xs">
+            <p className="font-outfit text-sm text-text-muted leading-relaxed max-w-xs mb-8">
               Check your phone and enter your M-Pesa PIN to complete the deposit.
             </p>
+            <button
+              onClick={() => { setManualCode(""); setManualError(""); setView("manual_code"); }}
+              className="font-outfit text-xs text-text-muted underline underline-offset-2 tap-target"
+            >
+              Already paid but it's not reflecting?
+            </button>
+          </div>
+        )}
+
+        {/* ── Manual M-Pesa code entry ── */}
+        {view === "manual_code" && (
+          <div className="px-4 py-6">
+            <div className="flex items-center gap-2 mb-5">
+              <button onClick={() => setView("processing")} className="tap-target -ml-1 text-text-muted">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <h2 className="font-syne font-bold text-base text-text-primary">Enter M-Pesa Code</h2>
+            </div>
+
+            <div className="mb-5 px-3 py-3 rounded-xl bg-gold/5 border border-gold/20">
+              <p className="font-outfit text-xs text-gold leading-relaxed">
+                Check your M-Pesa SMS for the transaction confirmation. The code looks like <span className="font-price">RDF4HJ8KP2</span>. Enter it below to manually confirm your deposit.
+              </p>
+            </div>
+
+            {manualError && (
+              <div className="mb-4 px-3 py-2.5 rounded-xl bg-down/10 border border-down/20">
+                <p className="font-outfit text-sm text-down">{manualError}</p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block font-outfit text-xs text-text-muted mb-1.5">M-Pesa Transaction Code</label>
+                <input
+                  type="text"
+                  value={manualCode}
+                  onChange={(e) => setManualCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
+                  className="w-full px-3 py-3 rounded-xl bg-bg border border-border font-price text-base text-text-primary outline-none focus:border-primary transition-colors tracking-widest uppercase"
+                  placeholder="e.g. RDF4HJ8KP2"
+                  maxLength={20}
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <p className="font-outfit text-[10px] text-text-muted mt-1">Found in your M-Pesa SMS confirmation</p>
+              </div>
+
+              <button
+                disabled={manualCode.length < 6 || manualSubmitting}
+                onClick={async () => {
+                  if (!deposit.txId) return;
+                  setManualSubmitting(true);
+                  setManualError("");
+                  try {
+                    const { apiPost: post } = await import("@/lib/api/client");
+                    const result = await post<{ status: string; usdtCredited?: string; mpesaCode?: string; message?: string }>(
+                      "/mpesa/manual-confirm",
+                      { txId: deposit.txId, mpesaCode: manualCode }
+                    );
+                    if (result.status === "completed") {
+                      setView("success");
+                    } else {
+                      setView("pending_review");
+                    }
+                  } catch (err) {
+                    setManualError(err instanceof Error ? err.message : "Failed to verify code");
+                  } finally {
+                    setManualSubmitting(false);
+                  }
+                }}
+                className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {manualSubmitting ? "Verifying…" : "Confirm Payment"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Pending review (manual code submitted but needs admin check) ── */}
+        {view === "pending_review" && (
+          <div className="px-4 py-10 flex flex-col items-center text-center">
+            <div className="w-16 h-16 rounded-full bg-gold/10 border border-gold/30 flex items-center justify-center mb-5">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="#F0B429" strokeWidth="1.75"/>
+                <path d="M12 7v5l3 3" stroke="#F0B429" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <h3 className="font-syne font-bold text-lg text-text-primary mb-2">Under Review</h3>
+            <p className="font-outfit text-sm text-text-muted leading-relaxed mb-2 max-w-xs">
+              Your M-Pesa code <span className="font-price text-text-primary">{manualCode}</span> has been submitted for verification.
+            </p>
+            <p className="font-outfit text-sm text-text-muted mb-8 max-w-xs">
+              We'll verify and credit your account within <span className="font-semibold text-gold">30 minutes</span>. A support ticket has been opened automatically.
+            </p>
+            <button onClick={handleClose} className="btn-primary max-w-xs w-full">Done</button>
           </div>
         )}
 

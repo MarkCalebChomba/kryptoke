@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { useKesWithdraw, useWithdrawLimits } from "@/lib/hooks/useWithdraw";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { useAuth } from "@/lib/store";
+import { apiGet } from "@/lib/api/client";
 import { PinPad } from "@/components/auth/PinPad";
 import { BottomSheet } from "@/components/shared/BottomSheet";
 import { cn } from "@/lib/utils/cn";
@@ -20,10 +23,18 @@ import Big from "big.js";
 type View = "form" | "pin" | "processing" | "success" | "failed";
 
 export function KesWithdrawForm() {
+  const router = useRouter();
   const { user } = useAuth();
   const { kesBalance } = useWallet();
   const { data: limits } = useWithdrawLimits();
   const withdraw = useKesWithdraw();
+
+  // Check if fund password is set
+  const { data: secStatus } = useQuery({
+    queryKey: ["security", "status"],
+    queryFn: () => apiGet<{ fundPasswordSet: boolean }>("/account/security-status"),
+    staleTime: 60_000,
+  });
 
   const [view, setView] = useState<View>("form");
   const [amount, setAmount] = useState("");
@@ -139,6 +150,30 @@ export function KesWithdrawForm() {
           className="btn-primary max-w-xs w-full">
           Try Again
         </button>
+      </div>
+    );
+  }
+
+  // Fund password not set — block access and guide user to set it
+  if (secStatus && !secStatus.fundPasswordSet) {
+    return (
+      <div className="px-4 py-10 flex flex-col items-center text-center">
+        <div className="w-16 h-16 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center mb-5">
+          <span className="text-3xl">🔑</span>
+        </div>
+        <h3 className="font-syne font-bold text-lg text-text-primary mb-2">Fund Password Required</h3>
+        <p className="font-outfit text-sm text-text-muted leading-relaxed mb-6 max-w-xs">
+          You need to set a 6-digit fund password before you can make withdrawals. This protects your funds from unauthorized access.
+        </p>
+        <button
+          onClick={() => router.push("/security")}
+          className="btn-primary max-w-xs w-full mb-3"
+        >
+          Set Fund Password
+        </button>
+        <p className="font-outfit text-xs text-text-muted">
+          Settings → Security Center → Fund Password
+        </p>
       </div>
     );
   }

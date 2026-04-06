@@ -21,7 +21,7 @@ account.get("/security-status", async (c) => {
   const db  = getDb();
 
   const [userRes, kycRes] = await Promise.all([
-    db.from("users").select("totp_enabled, phone, anti_phishing_code, whitelist_enabled, kyc_status").eq("uid", uid).single(),
+    db.from("users").select("totp_enabled, phone, anti_phishing_code, whitelist_enabled, kyc_status, asset_pin_hash").eq("uid", uid).single(),
     db.from("kyc_submissions").select("status").eq("uid", uid).order("created_at", { ascending: false }).limit(1),
   ]);
 
@@ -35,6 +35,7 @@ account.get("/security-status", async (c) => {
       antiPhishingCode: u?.anti_phishing_code ?? null,
       whitelistEnabled: u?.whitelist_enabled ?? false,
       kycLevel:         u?.kyc_status === "verified" ? 2 : u?.kyc_status === "submitted" ? 1 : 0,
+      fundPasswordSet:  !!(u?.asset_pin_hash),
     },
   });
 });

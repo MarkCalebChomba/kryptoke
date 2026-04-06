@@ -416,7 +416,7 @@ withdraw.get("/limits", withApiRateLimit(), async (c) => {
   const { data: dailyTotal } = await db.rpc("get_daily_withdrawal_total", { p_uid: uid, p_date: today });
   const used = (dailyTotal as number | null) ?? 0;
   const remaining = Math.max(0, parseFloat(DAILY_LIMIT_KES) - used);
-  return c.json({ success: true, data: { dailyLimitKes: DAILY_LIMIT_KES, usedTodayKes: used.toFixed(2), remainingKes: remaining.toFixed(2), minMpesaWithdrawal: MIN_WITHDRAWAL_KES, mpesaFeePercent: MPESA_FEE_PERCENT } });
+  return c.json({ success: true, data: { dailyLimit: DAILY_LIMIT_KES, usedToday: used.toFixed(2), remaining: remaining.toFixed(2), minMpesaWithdrawal: MIN_WITHDRAWAL_KES, mpesaFeePercent: MPESA_FEE_PERCENT } });
 });
 
 /* ── GET /queue ───────────────────────────────────────────────────────────── */
