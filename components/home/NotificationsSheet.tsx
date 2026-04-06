@@ -11,46 +11,58 @@ import type { Notification, NotificationType } from "@/types";
 
 const TYPE_ICONS: Record<NotificationType, string> = {
   deposit_confirmed: "💰",
-  withdrawal_sent: "📤",
-  price_alert: "🔔",
-  new_listing: "✨",
-  security_alert: "🛡️",
-  earn_interest: "💹",
-  order_filled: "✅",
-  announcement: "📢",
-  kyc_update: "🪪",
+  withdrawal_sent:   "📤",
+  price_alert:       "🔔",
+  new_listing:       "✨",
+  security_alert:    "🛡️",
+  earn_interest:     "💹",
+  order_filled:      "✅",
+  announcement:      "📢",
+  kyc_update:        "🪪",
 };
 
-// SVG icons to avoid emoji (spec says no emoji)
-function NotifIcon({ type }: { type: NotificationType }) {
-  const colorMap: Record<NotificationType, string> = {
-    deposit_confirmed: "text-up bg-up/10",
-    withdrawal_sent: "text-primary bg-primary/10",
-    price_alert: "text-gold bg-gold/10",
-    new_listing: "text-primary bg-primary/10",
-    security_alert: "text-down bg-down/10",
-    earn_interest: "text-up bg-up/10",
-    order_filled: "text-primary bg-primary/10",
-    announcement: "text-gold bg-gold/10",
-    kyc_update: "text-text-secondary bg-bg-surface2",
-  };
+const TYPE_COLORS: Record<NotificationType, string> = {
+  deposit_confirmed: "text-up bg-up/10",
+  withdrawal_sent:   "text-primary bg-primary/10",
+  price_alert:       "text-gold bg-gold/10",
+  new_listing:       "text-primary bg-primary/10",
+  security_alert:    "text-down bg-down/10",
+  earn_interest:     "text-up bg-up/10",
+  order_filled:      "text-primary bg-primary/10",
+  announcement:      "text-gold bg-gold/10",
+  kyc_update:        "text-text-secondary bg-bg-surface2",
+};
 
-  return (
-    <div className={cn(
-      "w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-sm",
-      colorMap[type]
-    )}>
-      {TYPE_ICONS[type]}
-    </div>
-  );
+// Build the deep-link route for a notification, including reference_id as query param
+function getNotifRoute(notification: Notification): string {
+  const data = (notification.data ?? {}) as Record<string, string>;
+  const refId = data.txId || data.depositId || data.withdrawalId || data.orderId || data.referenceId || "";
+
+  switch (notification.type) {
+    case "deposit_confirmed":
+      return refId ? `/me?highlight=${refId}` : "/me";
+    case "withdrawal_sent":
+      return refId ? `/me?highlight=${refId}` : "/me";
+    case "earn_interest":
+      return refId ? `/me?highlight=${refId}` : "/earn";
+    case "order_filled":
+      return refId ? `/me?highlight=${refId}` : "/trade";
+    case "price_alert":
+      return data.symbol ? `/markets/${data.symbol}` : "/markets";
+    case "new_listing":
+      return data.symbol ? `/markets/${data.symbol}` : "/markets";
+    case "security_alert":
+      return "/security";
+    case "kyc_update":
+      return "/kyc";
+    case "announcement":
+      return "/";
+    default:
+      return "/";
+  }
 }
 
-interface NotifRowProps {
-  notification: Notification;
-  onClick: () => void;
-}
-
-function NotifRow({ notification, onClick }: NotifRowProps) {
+function NotifRow({ notification, onClick }: { notification: Notification; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -59,7 +71,12 @@ function NotifRow({ notification, onClick }: NotifRowProps) {
       {!notification.read && (
         <span className="absolute left-2 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary" />
       )}
-      <NotifIcon type={notification.type} />
+      <div className={cn(
+        "w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-sm",
+        TYPE_COLORS[notification.type]
+      )}>
+        {TYPE_ICONS[notification.type]}
+      </div>
       <div className="flex-1 text-left min-w-0">
         <p className={cn(
           "font-outfit text-sm leading-tight",
@@ -74,49 +91,29 @@ function NotifRow({ notification, onClick }: NotifRowProps) {
           {formatTimeAgo(notification.createdAt)}
         </p>
       </div>
+      {/* Arrow indicating it's tappable and has a deep link */}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-text-muted mt-1 flex-shrink-0">
+        <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
     </button>
   );
 }
 
-interface NotificationsSheetProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps) {
+export function NotificationsSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const router = useRouter();
   const { notifications, unreadCount } = useNotificationsStore();
   const { isLoading } = useNotifications();
   const markAllRead = useMarkAllRead();
+  const [expanded, setExpanded] = useState(false);
 
   function handleNotifClick(notification: Notification) {
     onClose();
-    const data = notification.data as Record<string, string>;
-
-    const routes: Record<string, string> = {
-      deposit_confirmed: "/",
-      withdrawal_sent: "/",
-      price_alert: "/markets",
-      new_listing: "/markets",
-      security_alert: "/me",
-      earn_interest: "/earn",
-      order_filled: "/trade",
-      announcement: "/",
-      kyc_update: "/me",
-    };
-
-    router.push(routes[notification.type] ?? "/");
-    void data;
+    const route = getNotifRoute(notification);
+    router.push(route);
   }
 
-  const [expanded, setExpanded] = useState(false);
-
   return (
-    <BottomSheet
-      isOpen={isOpen}
-      onClose={onClose}
-      maxHeight={expanded ? "97dvh" : "85dvh"}
-    >
+    <BottomSheet isOpen={isOpen} onClose={onClose} maxHeight={expanded ? "97dvh" : "85dvh"}>
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border">
         <div>
           <h2 className="font-syne font-bold text-base text-text-primary">Notifications</h2>
@@ -131,9 +128,7 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
               Mark all read
             </button>
           )}
-          {/* Expand to full screen */}
-          <button onClick={() => setExpanded((e) => !e)}
-            className="tap-target text-text-muted" aria-label={expanded ? "Collapse" : "Expand"}>
+          <button onClick={() => setExpanded((e) => !e)} className="tap-target text-text-muted">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               {expanded
                 ? <><path d="M8 3v3a2 2 0 0 1-2 2H3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/><path d="M21 8h-3a2 2 0 0 1-2-2V3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 16h3a2 2 0 0 1 2 2v3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/><path d="M16 21v-3a2 2 0 0 1 2-2h3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/></>
