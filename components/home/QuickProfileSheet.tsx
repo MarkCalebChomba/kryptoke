@@ -133,7 +133,7 @@ export function QuickProfileSheet({ isOpen, onClose }: QuickProfileSheetProps) {
             {[
               { label: "My Assets", path: "/assets" },
               { label: "Transaction History", path: "/analysis" },
-              { label: "Security Settings", path: "/me" },
+              { label: "Security Settings", path: "/account?tab=security" },
             ].map(({ label, path }) => (
               <button key={label} onClick={() => goTo(path)}
                 className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl active:bg-bg-surface2 transition-colors">
