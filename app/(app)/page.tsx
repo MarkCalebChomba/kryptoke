@@ -25,6 +25,30 @@ const FALLBACK_META: Record<string, { name: string; logo: string }> = {
   XRP: { name: "XRP",      logo: "https://assets.coingecko.com/coins/images/44/thumb/xrp-symbol-white-128.png" },
 };
 
+// ── Mini sparkline for coin tiles ─────────────────────────────────────────────
+function TileSparkline({ change }: { change: string }) {
+  const pct = parseFloat(change) || 0;
+  const color = pct >= 0 ? "#00D68F" : "#FF4560";
+  const pts: number[] = [];
+  let v = 50;
+  const seed = Math.abs(pct * 137.5) % 100;
+  for (let i = 0; i < 8; i++) {
+    const noise = ((seed * (i + 1) * 6.7) % 18) - 9;
+    v = Math.max(10, Math.min(90, v + noise));
+    pts.push(v);
+  }
+  pts[7] = pct >= 0 ? Math.min(85, 50 + Math.abs(pct) * 2.5) : Math.max(15, 50 - Math.abs(pct) * 2.5);
+  const W = 80, H = 28, xStep = W / (pts.length - 1);
+  const toY = (v: number) => H - ((v - 10) / 80) * H;
+  const d = pts.map((v, i) => `${i === 0 ? "M" : "L"} ${(i * xStep).toFixed(1)} ${toY(v).toFixed(1)}`).join(" ");
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <path d={d + ` L ${W} ${H} L 0 ${H} Z`} fill={color} fillOpacity="0.12" />
+      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // ── Mini coin tile ─────────────────────────────────────────────────────────────
 function CoinTile({ symbol, name, logo_url, price, change_24h, onClick }: {
   symbol: string; name: string; logo_url: string;
@@ -37,25 +61,25 @@ function CoinTile({ symbol, name, logo_url, price, change_24h, onClick }: {
   return (
     <button
       onClick={onClick}
-      className="flex-shrink-0 w-[120px] rounded-2xl border border-border bg-bg-surface2 p-3 text-left active:scale-95 transition-transform"
+      className="flex-shrink-0 w-[110px] rounded-2xl border border-border bg-bg-surface p-2.5 text-left active:scale-95 transition-transform overflow-hidden"
     >
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-7 h-7 rounded-full bg-bg-surface overflow-hidden flex items-center justify-center flex-shrink-0 border border-border">
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="w-6 h-6 rounded-full bg-bg-surface2 overflow-hidden flex items-center justify-center flex-shrink-0 border border-border">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={logo_url} alt={symbol} className="w-full h-full object-cover"
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
         </div>
         <div className="min-w-0">
-          <p className="font-outfit font-bold text-xs text-text-primary truncate">{symbol}</p>
-          <p className="font-outfit text-[9px] text-text-muted truncate">{name}</p>
+          <p className="font-outfit font-bold text-xs text-text-primary">{symbol}</p>
         </div>
       </div>
-      <p className="font-price text-sm font-semibold text-text-primary tabular-nums">
+      <TileSparkline change={change_24h} />
+      <p className="font-price text-sm font-semibold text-text-primary tabular-nums mt-1">
         {formatPrice(price)}
       </p>
       <span className={cn(
-        "inline-block text-[10px] font-price font-semibold mt-1 px-1.5 py-0.5 rounded-md tabular-nums",
-        isPos ? "bg-up/15 text-up" : isNeg ? "bg-down/15 text-down" : "bg-bg-surface text-text-muted"
+        "inline-block text-[10px] font-price font-semibold mt-0.5 px-1.5 py-0.5 rounded tabular-nums",
+        isPos ? "bg-up/15 text-up" : isNeg ? "bg-down/15 text-down" : "bg-bg-surface2 text-text-muted"
       )}>
         {formatChange(change_24h)}
       </span>
@@ -202,48 +226,76 @@ export default function HomePage() {
 
       />
 
-      {/* Quick actions + Fear & Greed in one row */}
+      {/* Quick actions — 5 across */}
       <div className="mx-4 mt-4 flex items-center justify-between">
-        {/* Left: 3 icon actions */}
-        <div className="flex items-center gap-5">
-          <QuickAction
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M12 4v16M4 12h16" stroke="#00D68F" strokeWidth="2.5" strokeLinecap="round"/>
-              </svg>
-            }
-            label="Deposit" color="text-up" bg="bg-up/10"
-            onClick={() => setDepositOpen(true)}
-          />
-          <QuickAction
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M12 20V4M4 12l8-8 8 8" stroke="#FF4560" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            }
-            label="Withdraw" color="text-down" bg="bg-down/10"
-            onClick={() => router.push("/withdraw")}
-          />
-          <QuickAction
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M7 16l-4-4 4-4M17 8l4 4-4 4M14 4l-4 16" stroke="#00B4FF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            }
-            label="Transfer" color="text-primary" bg="bg-primary/10"
-            onClick={() => router.push("/me")}
-          />
-        </div>
+        <QuickAction
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 4v16M4 12h16" stroke="#00D68F" strokeWidth="2.5" strokeLinecap="round"/>
+            </svg>
+          }
+          label="Deposit" color="text-up" bg="bg-up/10"
+          onClick={() => setDepositOpen(true)}
+        />
+        <QuickAction
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 20V4M4 12l8-8 8 8" stroke="#FF4560" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          }
+          label="Withdraw" color="text-down" bg="bg-down/10"
+          onClick={() => router.push("/withdraw")}
+        />
+        <QuickAction
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M7 12h10M13 8l4 4-4 4" stroke="#F0B429" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          }
+          label="Trade" color="text-gold" bg="bg-gold/10"
+          onClick={() => router.push("/trade")}
+        />
+        <QuickAction
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M8 7h12M8 12h8M8 17h5" stroke="#00B4FF" strokeWidth="2.5" strokeLinecap="round"/>
+              <circle cx="3.5" cy="7" r="1.5" fill="#00B4FF"/>
+              <circle cx="3.5" cy="12" r="1.5" fill="#00B4FF"/>
+              <circle cx="3.5" cy="17" r="1.5" fill="#00B4FF"/>
+            </svg>
+          }
+          label="Convert" color="text-primary" bg="bg-primary/10"
+          onClick={() => router.push("/trade")}
+        />
+        <QuickAction
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M4 17l4-4 4 4 8-8" stroke="#A855F7" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          }
+          label="Earn" color="text-purple-400" bg="bg-purple-500/10"
+          onClick={() => router.push("/earn")}
+        />
+      </div>
 
-        {/* Right: Fear & Greed semicircle */}
-        <div className="flex flex-col items-center">
-          <p className="font-outfit text-[9px] text-text-muted mb-0.5 uppercase tracking-wide">Fear &amp; Greed</p>
+      {/* Fear & Greed — full row below actions */}
+      <div className="mx-4 mt-4 flex items-center gap-3 px-3 py-2.5 rounded-2xl bg-bg-surface border border-border">
+        <div className="flex-1">
+          <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wide">Fear &amp; Greed Index</p>
           {fearGreed ? (
-            <FearGreedSemi value={fearGreed.value} label={fearGreed.classification} color={fgColor} />
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="font-price text-2xl font-bold" style={{ color: fgColor }}>{fearGreed.value}</span>
+              <span className="font-outfit text-xs font-semibold" style={{ color: fgColor }}>{fearGreed.classification}</span>
+            </div>
           ) : (
-            <div className="w-[140px] h-[95px] skeleton rounded-xl" />
+            <div className="skeleton h-7 w-24 rounded mt-1" />
           )}
         </div>
+        {fearGreed ? (
+          <FearGreedSemi value={fearGreed.value} label={fearGreed.classification} color={fgColor} />
+        ) : (
+          <div className="w-[140px] h-[80px] skeleton rounded-xl" />
+        )}
       </div>
 
       {/* Market overview strip */}

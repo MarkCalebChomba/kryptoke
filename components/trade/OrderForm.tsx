@@ -29,10 +29,11 @@ interface OrderFormProps {
   onDepositClick: () => void;
   externalPrice?: string;
   externalAmount?: string;
+  externalSide?: "buy" | "sell";
   onExternalConsumed?: () => void;
 }
 
-export function OrderForm({ symbol, tokenAddress, onDepositClick, externalPrice, externalAmount, onExternalConsumed }: OrderFormProps) {
+export function OrderForm({ symbol, tokenAddress, onDepositClick, externalPrice, externalAmount, externalSide, onExternalConsumed }: OrderFormProps) {
   const router = useRouter();
   const toast = useToastActions();
 
@@ -75,6 +76,15 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick, externalPrice,
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalAmount]);
+
+  // Consume external side (e.g. from Buy/Sell on token detail)
+  useEffect(() => {
+    if (externalSide) {
+      setSide(externalSide);
+      onExternalConsumed?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSide]);
 
   // Pre-fill price with market price
   useEffect(() => {

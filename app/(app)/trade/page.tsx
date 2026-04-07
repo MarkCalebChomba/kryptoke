@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import { ChartSection } from "@/components/trade/ChartSection";
 import { DepositSheet } from "@/components/home/DepositSheet";
 import { BottomSheet } from "@/components/shared/BottomSheet";
 import { useTicker } from "@/lib/hooks/useMarketData";
 import { useWallet } from "@/lib/hooks/useWallet";
-import { usePreferences } from "@/lib/store";
 import { formatPrice, formatChange, priceDirection } from "@/lib/utils/formatters";
 import { IconChevronDown } from "@/components/icons";
 import { cn } from "@/lib/utils/cn";
@@ -21,7 +21,7 @@ const PairSelector = dynamic(() => import("@/components/trade/PairSelector").the
 
 type TradeMode = "Convert" | "Spot" | "Futures" | "DEX" | "Bots";
 
-// ── Persistent last-used state ───────────────────────────────────────────────
+// ── Persistent last-used state ────────────────────────────────────────────────
 function getLastTrade(): { symbol: string; mode: TradeMode } {
   if (typeof window === "undefined") return { symbol: "BTC", mode: "Spot" };
   try {
@@ -35,56 +35,26 @@ function saveLastTrade(symbol: string, mode: TradeMode) {
   try { localStorage.setItem("_kk_last_trade", JSON.stringify({ symbol, mode })); } catch { /* ignore */ }
 }
 
-// ── Trade mode tab bar ───────────────────────────────────────────────────────
+// ── Trade mode tab bar ────────────────────────────────────────────────────────
 const TRADE_MODES: { mode: TradeMode; label: string; color: string }[] = [
   { mode: "Convert", label: "Convert", color: "#00B4FF" },
   { mode: "Spot",    label: "Spot",    color: "#00D68F" },
   { mode: "Futures", label: "Futures", color: "#F0B429" },
 ];
 
-function TradeModeBar({ activeMode, onChange }: {
-  activeMode: TradeMode;
-  onChange: (mode: TradeMode) => void;
-}) {
-  return (
-    <div className="flex border-b border-border">
-      {TRADE_MODES.map(({ mode, label, color }) => (
-        <button
-          key={mode}
-          onClick={() => onChange(mode)}
-          className={cn(
-            "flex-1 py-2.5 font-outfit text-xs font-semibold transition-all border-b-2 -mb-px",
-            activeMode === mode ? "border-current" : "border-transparent text-text-muted"
-          )}
-          style={activeMode === mode ? { color, borderColor: color } : {}}
-        >
-          {label}
-        </button>
-      ))}
-      {/* DEX / Bots as muted extras */}
-      <button
-        onClick={() => onChange("DEX")}
-        className="px-3 py-2.5 font-outfit text-xs text-text-muted border-b-2 border-transparent -mb-px"
-      >
-        DEX
-      </button>
-      <button
-        onClick={() => onChange("Bots")}
-        className="px-3 py-2.5 font-outfit text-xs text-text-muted border-b-2 border-transparent -mb-px"
-      >
-        Bots
-      </button>
-    </div>
-  );
-}
-
-// ── Main trade page ──────────────────────────────────────────────────────────
+// ── Main trade page ───────────────────────────────────────────────────────────
 export default function TradePage() {
+  const searchParams = useSearchParams();
   const last = getLastTrade();
 
-  const [activeMode,       setActiveMode]       = useState<TradeMode>(last.mode);
-  const [symbol,           setSymbol]           = useState(last.symbol);
-  const [tokenAddress,     setTokenAddress]     = useState(`${last.symbol}USDT`);
+  // Honour ?symbol=BTC&side=buy&mode=Spot from token detail page
+  const qSymbol = searchParams.get("symbol")?.toUpperCase() ?? null;
+  const qSide   = searchParams.get("side") as "buy" | "sell" | null;
+  const qMode   = searchParams.get("mode") as TradeMode | null;
+
+  const [activeMode,       setActiveMode]       = useState<TradeMode>(qMode ?? last.mode);
+  const [symbol,           setSymbol]           = useState(qSymbol ?? last.symbol);
+  const [tokenAddress,     setTokenAddress]     = useState(`${qSymbol ?? last.symbol}USDT`);
   const [pairSelectorOpen, setPairSelectorOpen] = useState(false);
   const [depositOpen,      setDepositOpen]      = useState(false);
   const [comingSoon,       setComingSoon]        = useState<{ open: boolean; feature: string }>({ open: false, feature: "" });
@@ -92,6 +62,8 @@ export default function TradePage() {
   // Orderbook → OrderForm bridge
   const [injectedPrice,  setInjectedPrice]  = useState<string | undefined>();
   const [injectedAmount, setInjectedAmount] = useState<string | undefined>();
+  // Inject the buy/sell side from query param
+  const [injectedSide,   setInjectedSide]   = useState<"buy" | "sell" | undefined>(qSide ?? undefined);
 
   const { price, change } = useTicker(`${symbol}USDT`);
   const { rate } = useWallet();
@@ -116,7 +88,6 @@ export default function TradePage() {
     saveLastTrade(sym, activeMode);
   }
 
-  // When user clicks an orderbook row, inject into form
   function handleOrderBookClick(price: string, qty: string) {
     setInjectedPrice(price);
     setInjectedAmount(qty);
@@ -124,7 +95,7 @@ export default function TradePage() {
 
   return (
     <div className="screen overflow-hidden flex flex-col">
-      {/* Top bar — pair info */}
+      {/* Top bar */}
       <div className="top-bar border-b border-border">
         <button onClick={() => setPairSelectorOpen(true)} className="flex items-center gap-2">
           <div>
@@ -147,20 +118,13 @@ export default function TradePage() {
           </div>
         </button>
 
-        {/* Mode switcher — compact tab style in top bar */}
+        {/* Mode tabs */}
         <div className="flex items-center gap-1">
           {TRADE_MODES.map(({ mode, label, color }) => (
-            <button
-              key={mode}
-              onClick={() => handleModeChange(mode)}
-              className={cn(
-                "px-2.5 py-1 rounded-lg font-outfit text-[11px] font-semibold transition-all border",
-                activeMode === mode
-                  ? "border-current bg-current/10"
-                  : "border-border text-text-muted"
-              )}
-              style={activeMode === mode ? { color, borderColor: `${color}50`, backgroundColor: `${color}15` } : {}}
-            >
+            <button key={mode} onClick={() => handleModeChange(mode)}
+              className={cn("px-2.5 py-1 rounded-lg font-outfit text-[11px] font-semibold transition-all border",
+                activeMode === mode ? "border-current bg-current/10" : "border-border text-text-muted")}
+              style={activeMode === mode ? { color, borderColor: `${color}50`, backgroundColor: `${color}15` } : {}}>
               {label}
             </button>
           ))}
@@ -170,16 +134,12 @@ export default function TradePage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {activeMode === "Convert" && <ConvertTab />}
-
         {activeMode === "Futures" && <FuturesTab />}
 
         {activeMode === "Spot" && (
           <>
             <ChartSection symbol={symbol} tokenAddress={tokenAddress} />
-
-            {/* Spot trading area — order form + orderbook side by side */}
             <div className="flex border-t border-border" style={{ minHeight: 380 }}>
-              {/* Order form — left 55% */}
               <div className="flex-[55] border-r border-border overflow-y-auto">
                 <OrderForm
                   symbol={symbol}
@@ -187,10 +147,14 @@ export default function TradePage() {
                   onDepositClick={() => setDepositOpen(true)}
                   externalPrice={injectedPrice}
                   externalAmount={injectedAmount}
-                  onExternalConsumed={() => { setInjectedPrice(undefined); setInjectedAmount(undefined); }}
+                  externalSide={injectedSide}
+                  onExternalConsumed={() => {
+                    setInjectedPrice(undefined);
+                    setInjectedAmount(undefined);
+                    setInjectedSide(undefined);
+                  }}
                 />
               </div>
-              {/* Orderbook — right 45% */}
               <div className="flex-[45] overflow-hidden">
                 <OrderBook
                   symbol={`${symbol}USDT`}
