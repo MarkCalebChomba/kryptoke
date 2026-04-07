@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { ChartSection } from "@/components/trade/ChartSection";
 import { DepositSheet } from "@/components/home/DepositSheet";
@@ -21,7 +21,7 @@ const PairSelector = dynamic(() => import("@/components/trade/PairSelector").the
 
 type TradeMode = "Convert" | "Spot" | "Futures" | "DEX" | "Bots";
 
-// ── Persistent last-used state via localStorage ───────────────────────────────
+// ── Persistent last-used state ───────────────────────────────────────────────
 function getLastTrade(): { symbol: string; mode: TradeMode } {
   if (typeof window === "undefined") return { symbol: "BTC", mode: "Spot" };
   try {
@@ -35,104 +35,51 @@ function saveLastTrade(symbol: string, mode: TradeMode) {
   try { localStorage.setItem("_kk_last_trade", JSON.stringify({ symbol, mode })); } catch { /* ignore */ }
 }
 
-// ── Animated trade FAB menu ───────────────────────────────────────────────────
-const TRADE_MODES: { mode: TradeMode; label: string; icon: string; color: string }[] = [
-  { mode: "Convert", label: "Convert", icon: "⇄", color: "#00B4FF" },
-  { mode: "Spot",    label: "Spot",    icon: "◈", color: "#00D68F" },
-  { mode: "Futures", label: "Futures", icon: "⚡", color: "#F0B429" },
-  { mode: "DEX",     label: "DEX",     icon: "⬡", color: "#A855F7" },
-  { mode: "Bots",    label: "Bots",    icon: "⚙", color: "#FF8C42" },
+// ── Trade mode tab bar ───────────────────────────────────────────────────────
+const TRADE_MODES: { mode: TradeMode; label: string; color: string }[] = [
+  { mode: "Convert", label: "Convert", color: "#00B4FF" },
+  { mode: "Spot",    label: "Spot",    color: "#00D68F" },
+  { mode: "Futures", label: "Futures", color: "#F0B429" },
 ];
 
-function TradeModeButton({ activeMode, onChange }: {
+function TradeModeBar({ activeMode, onChange }: {
   activeMode: TradeMode;
   onChange: (mode: TradeMode) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [animating, setAnimating] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
-
-  function toggleMenu() {
-    setAnimating(true);
-    setOpen((v) => !v);
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setAnimating(false), 300);
-  }
-
-  function select(mode: TradeMode) {
-    setOpen(false);
-    onChange(mode);
-  }
-
   return (
-    <div className="relative">
-      {/* Backdrop */}
-      {open && (
-        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-      )}
-
-      {/* Mode pill */}
+    <div className="flex border-b border-border">
+      {TRADE_MODES.map(({ mode, label, color }) => (
+        <button
+          key={mode}
+          onClick={() => onChange(mode)}
+          className={cn(
+            "flex-1 py-2.5 font-outfit text-xs font-semibold transition-all border-b-2 -mb-px",
+            activeMode === mode ? "border-current" : "border-transparent text-text-muted"
+          )}
+          style={activeMode === mode ? { color, borderColor: color } : {}}
+        >
+          {label}
+        </button>
+      ))}
+      {/* DEX / Bots as muted extras */}
       <button
-        onClick={toggleMenu}
-        className={cn(
-          "flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-outfit text-xs font-semibold transition-all",
-          "border active:scale-95",
-          open ? "bg-primary/10 border-primary/30 text-primary" : "bg-bg-surface2 border-border text-text-muted"
-        )}
+        onClick={() => onChange("DEX")}
+        className="px-3 py-2.5 font-outfit text-xs text-text-muted border-b-2 border-transparent -mb-px"
       >
-        {/* Animated lines icon */}
-        <span className={cn("flex flex-col gap-[3px] transition-all duration-300", open && "rotate-45")}>
-          <span className={cn(
-            "block h-[2px] w-4 rounded-full bg-current transition-all duration-300",
-            open ? "translate-y-[5px]" : ""
-          )} />
-          <span className={cn(
-            "block h-[2px] w-4 rounded-full bg-current transition-all duration-300",
-            open ? "opacity-0 scale-x-0" : ""
-          )} />
-          <span className={cn(
-            "block h-[2px] w-4 rounded-full bg-current transition-all duration-300",
-            open ? "-translate-y-[5px] -rotate-90" : ""
-          )} />
-        </span>
-        <span>{activeMode}</span>
-        <IconChevronDown size={12} className={cn("transition-transform duration-200", open && "rotate-180")} />
+        DEX
       </button>
-
-      {/* Dropdown menu */}
-      {open && (
-        <div className={cn(
-          "absolute top-full left-0 mt-2 z-50 bg-bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden",
-          "animate-in fade-in slide-in-from-top-2 duration-150"
-        )}>
-          {TRADE_MODES.map(({ mode, label, icon, color }) => (
-            <button
-              key={mode}
-              onClick={() => select(mode)}
-              className={cn(
-                "flex items-center gap-3 w-full px-4 py-3 font-outfit text-sm transition-colors",
-                mode === activeMode ? "bg-bg-surface2" : "hover:bg-bg-surface2",
-                "active:bg-bg-surface2"
-              )}
-            >
-              <span className="text-base leading-none w-5 text-center" style={{ color }}>{icon}</span>
-              <span className={cn("font-medium", mode === activeMode ? "text-text-primary" : "text-text-secondary")}>
-                {label}
-              </span>
-              {mode === activeMode && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+      <button
+        onClick={() => onChange("Bots")}
+        className="px-3 py-2.5 font-outfit text-xs text-text-muted border-b-2 border-transparent -mb-px"
+      >
+        Bots
+      </button>
     </div>
   );
 }
 
-// ── Main trade page ───────────────────────────────────────────────────────────
+// ── Main trade page ──────────────────────────────────────────────────────────
 export default function TradePage() {
-  const { setPreferences } = usePreferences();
   const last = getLastTrade();
 
   const [activeMode,       setActiveMode]       = useState<TradeMode>(last.mode);
@@ -141,6 +88,10 @@ export default function TradePage() {
   const [pairSelectorOpen, setPairSelectorOpen] = useState(false);
   const [depositOpen,      setDepositOpen]      = useState(false);
   const [comingSoon,       setComingSoon]        = useState<{ open: boolean; feature: string }>({ open: false, feature: "" });
+
+  // Orderbook → OrderForm bridge
+  const [injectedPrice,  setInjectedPrice]  = useState<string | undefined>();
+  const [injectedAmount, setInjectedAmount] = useState<string | undefined>();
 
   const { price, change } = useTicker(`${symbol}USDT`);
   const { rate } = useWallet();
@@ -165,32 +116,55 @@ export default function TradePage() {
     saveLastTrade(sym, activeMode);
   }
 
+  // When user clicks an orderbook row, inject into form
+  function handleOrderBookClick(price: string, qty: string) {
+    setInjectedPrice(price);
+    setInjectedAmount(qty);
+  }
+
   return (
     <div className="screen overflow-hidden flex flex-col">
-      {/* Top bar */}
+      {/* Top bar — pair info */}
       <div className="top-bar border-b border-border">
-        {/* Pair selector */}
-        <button onClick={() => setPairSelectorOpen(true)} className="flex items-center gap-2.5">
+        <button onClick={() => setPairSelectorOpen(true)} className="flex items-center gap-2">
           <div>
             <div className="flex items-center gap-1">
-              <span className="font-syne font-bold text-base text-text-primary">{symbol}</span>
-              <span className="font-outfit text-sm text-text-muted">/USDT</span>
-              <IconChevronDown size={14} className="text-text-muted" />
+              <span className="font-syne font-bold text-sm text-text-primary">{symbol}</span>
+              <span className="font-outfit text-xs text-text-muted">/USDT</span>
+              <IconChevronDown size={12} className="text-text-muted" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className={cn("font-price text-sm font-semibold",
+            <div className="flex items-center gap-1.5">
+              <span className={cn("font-price text-xs font-semibold",
                 dir === "up" ? "text-up" : dir === "down" ? "text-down" : "text-text-secondary")}>
                 {formatPrice(price)}
               </span>
-              <span className="font-outfit text-xs text-text-muted">{kesPrice}</span>
-              <span className={cn("font-price text-xs",
+              <span className="font-outfit text-[10px] text-text-muted">{kesPrice}</span>
+              <span className={cn("font-price text-[10px]",
                 dir === "up" ? "text-up" : dir === "down" ? "text-down" : "text-text-muted")}>
                 {formatChange(change)}
               </span>
             </div>
           </div>
         </button>
-        <TradeModeButton activeMode={activeMode} onChange={handleModeChange} />
+
+        {/* Mode switcher — compact tab style in top bar */}
+        <div className="flex items-center gap-1">
+          {TRADE_MODES.map(({ mode, label, color }) => (
+            <button
+              key={mode}
+              onClick={() => handleModeChange(mode)}
+              className={cn(
+                "px-2.5 py-1 rounded-lg font-outfit text-[11px] font-semibold transition-all border",
+                activeMode === mode
+                  ? "border-current bg-current/10"
+                  : "border-border text-text-muted"
+              )}
+              style={activeMode === mode ? { color, borderColor: `${color}50`, backgroundColor: `${color}15` } : {}}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Content */}
@@ -202,19 +176,27 @@ export default function TradePage() {
         {activeMode === "Spot" && (
           <>
             <ChartSection symbol={symbol} tokenAddress={tokenAddress} />
-            <div className="flex border-t border-border" style={{ minHeight: 420 }}>
+
+            {/* Spot trading area — order form + orderbook side by side */}
+            <div className="flex border-t border-border" style={{ minHeight: 380 }}>
+              {/* Order form — left 55% */}
               <div className="flex-[55] border-r border-border overflow-y-auto">
                 <OrderForm
                   symbol={symbol}
                   tokenAddress={tokenAddress}
                   onDepositClick={() => setDepositOpen(true)}
+                  externalPrice={injectedPrice}
+                  externalAmount={injectedAmount}
+                  onExternalConsumed={() => { setInjectedPrice(undefined); setInjectedAmount(undefined); }}
                 />
               </div>
+              {/* Orderbook — right 45% */}
               <div className="flex-[45] overflow-hidden">
                 <OrderBook
                   symbol={`${symbol}USDT`}
                   currentPrice={price}
                   kesPerUsd={kesPerUsd}
+                  onPriceClick={handleOrderBookClick}
                 />
               </div>
             </div>
@@ -231,7 +213,7 @@ export default function TradePage() {
       />
       <DepositSheet isOpen={depositOpen} onClose={() => setDepositOpen(false)} />
 
-      {/* Coming soon sheet */}
+      {/* Coming soon */}
       <BottomSheet isOpen={comingSoon.open} onClose={() => setComingSoon({ open: false, feature: "" })}
         title={comingSoon.feature} showCloseButton>
         <div className="px-4 pb-8">
@@ -243,8 +225,8 @@ export default function TradePage() {
           </div>
           <p className="font-outfit text-sm text-text-secondary leading-relaxed mb-5">
             {comingSoon.feature === "DEX Trading"
-              ? "Trade directly on-chain without leaving KryptoKe. Swap any token on Uniswap, PancakeSwap, and more — coming soon."
-              : "Automate your trades with TWAP, Iceberg, and grid bots. Set it and let it run — coming soon."}
+              ? "Trade directly on-chain without leaving KryptoKe. Coming soon."
+              : "Automate your trades with TWAP, Iceberg, and grid bots. Coming soon."}
           </p>
           <button onClick={() => setComingSoon({ open: false, feature: "" })} className="btn-primary w-full">Got it</button>
         </div>

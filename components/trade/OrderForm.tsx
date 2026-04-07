@@ -27,9 +27,12 @@ interface OrderFormProps {
   symbol: string;
   tokenAddress: string;
   onDepositClick: () => void;
+  externalPrice?: string;
+  externalAmount?: string;
+  onExternalConsumed?: () => void;
 }
 
-export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormProps) {
+export function OrderForm({ symbol, tokenAddress, onDepositClick, externalPrice, externalAmount, onExternalConsumed }: OrderFormProps) {
   const router = useRouter();
   const toast = useToastActions();
 
@@ -52,6 +55,26 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick }: OrderFormPro
 
   const livePrice = prices[`${symbol}USDT`] ?? "0";
   const available = side === "buy" ? usdtBalance : "0"; // simplified — buy uses USDT
+
+
+  // Consume external price/amount from orderbook click
+  useEffect(() => {
+    if (externalPrice) {
+      setPrice(externalPrice);
+      if (orderType === "market") setOrderType("limit");
+      onExternalConsumed?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalPrice]);
+
+  useEffect(() => {
+    if (externalAmount) {
+      setAmount(externalAmount);
+      setSliderPct(0);
+      onExternalConsumed?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalAmount]);
 
   // Pre-fill price with market price
   useEffect(() => {
