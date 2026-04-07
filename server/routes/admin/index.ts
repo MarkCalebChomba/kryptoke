@@ -1302,4 +1302,189 @@ admin.patch(
   }
 );
 
+/* ─── POST /users/:uid/suspend — suspend an account ─────────────────────── */
+
+admin.post(
+  "/users/:uid/suspend",
+  zValidator("json", z.object({
+    durationHours: z.number().int().min(1).max(8760), // 1h to 1 year
+    reason: z.string().min(5).max(500),
+    fundPassword: z.string().length(6).regex(/^\d+$/), // admin must confirm with fund password
+  })),
+  async (c) => {
+    const { uid } = c.req.param();
+    const { durationHours, reason, fundPassword } = c.req.valid("json");
+    const adminUser = c.get("user");
+    const db = getDb();
+
+    // Verify admin's fund password
+    const bcrypt = await import("bcryptjs");
+    const { findUserByUid: findUser } = await import("@/server/db/users");
+    const adminRow = await findUser(adminUser.uid);
+    if (!adminRow?.asset_pin_hash) {
+      return c.json({ success: false, error: "Set a fund password first before performing sensitive admin actions", statusCode: 400 }, 400);
+    }
+    const pinValid = await bcrypt.compare(fundPassword, adminRow.asset_pin_hash);
+    if (!pinValid) {
+      return c.json({ success: false, error: "Incorrect fund password", statusCode: 403 }, 403);
+    }
+
+    const suspendedUntil = new Date(Date.now() + durationHours * 3_600_000).toISOString();
+
+    const { error } = await db
+      .from("users")
+      .update({ suspended_until: suspendedUntil, suspension_reason: reason })
+      .eq("uid", uid);
+
+    if (error) return c.json({ success: false, error: error.message, statusCode: 500 }, 500);
+
+    // Clear Redis suspension cache so the new suspension takes effect immediately
+    const { redis } = await import("@/lib/redis/client");
+    await redis.set(`suspended:${uid}`, { until: suspendedUntil, reason }, { ex: 60 });
+
+    // Log it
+    await db.from("ledger_entries").insert({
+      uid,
+      asset: "USDT",
+      amount: "0",
+      type: "admin_adjustment",
+      note: `Account suspended by ${adminUser.email} for ${durationHours}h. Reason: ${reason}`,
+    }).catch(() => undefined);
+
+    return c.json({ success: true, data: { uid, suspendedUntil, reason } });
+  }
+);
+
+/* ─── POST /users/:uid/unsuspend — lift suspension ───────────────────────── */
+
+admin.post("/users/:uid/unsuspend", async (c) => {
+  const { uid } = c.req.param();
+  const db = getDb();
+
+  await db.from("users").update({ suspended_until: null, suspension_reason: null }).eq("uid", uid);
+
+  const { redis } = await import("@/lib/redis/client");
+  await redis.del(`suspended:${uid}`);
+
+  return c.json({ success: true, data: { uid, unsuspended: true } });
+});
+
+/* ─── POST /transactions/:id/revoke — reverse a ledger entry ─────────────── */
+
+admin.post(
+  "/transactions/:id/revoke",
+  zValidator("json", z.object({
+    reason: z.string().min(10).max(500),
+    fundPassword: z.string().length(6).regex(/^\d+$/),
+  })),
+  async (c) => {
+    const { id } = c.req.param();
+    const { reason, fundPassword } = c.req.valid("json");
+    const adminUser = c.get("user");
+    const db = getDb();
+
+    // Verify admin fund password
+    const bcrypt = await import("bcryptjs");
+    const { findUserByUid: findUser } = await import("@/server/db/users");
+    const adminRow = await findUser(adminUser.uid);
+    if (!adminRow?.asset_pin_hash) {
+      return c.json({ success: false, error: "Set a fund password before performing sensitive admin actions", statusCode: 400 }, 400);
+    }
+    const pinValid = await bcrypt.compare(fundPassword, adminRow.asset_pin_hash);
+    if (!pinValid) {
+      return c.json({ success: false, error: "Incorrect fund password", statusCode: 403 }, 403);
+    }
+
+    // Fetch the original ledger entry
+    const { data: entry, error: fetchErr } = await db
+      .from("ledger_entries")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchErr || !entry) {
+      return c.json({ success: false, error: "Transaction not found", statusCode: 404 }, 404);
+    }
+
+    // Prevent double-revocation
+    const { data: existing } = await db
+      .from("transaction_revocations")
+      .select("id")
+      .eq("ledger_entry_id", id)
+      .maybeSingle();
+
+    if (existing) {
+      return c.json({ success: false, error: "This transaction has already been revoked", statusCode: 409 }, 409);
+    }
+
+    const amount = parseFloat(entry.amount);
+    const reversalAmount = (-amount).toFixed(8);
+
+    // Get current balance before reversal
+    const { getBalance, upsertBalance, createLedgerEntry } = await import("@/server/db/balances");
+    const { add } = await import("@/lib/utils/money");
+    const account = (entry.account as string) ?? "funding";
+    const currentBalance = await getBalance(entry.uid, entry.asset, account as "funding" | "trading" | "earn");
+
+    const newBalance = add(currentBalance, reversalAmount);
+    if (parseFloat(newBalance) < 0) {
+      return c.json({
+        success: false,
+        error: `Cannot revoke: would take balance below zero (current: ${currentBalance} ${entry.asset}, reversal: ${reversalAmount})`,
+        statusCode: 400,
+      }, 400);
+    }
+
+    // Apply reversal
+    await upsertBalance(entry.uid, entry.asset, newBalance, account as "funding" | "trading" | "earn");
+
+    // Create reversal ledger entry
+    await createLedgerEntry({
+      uid: entry.uid,
+      asset: entry.asset,
+      amount: reversalAmount,
+      type: "admin_adjustment",
+      reference_id: entry.id,
+      note: `REVOKED by ${adminUser.email}: ${reason}. Original: ${entry.note ?? "(no note)"}`,
+    });
+
+    // Record revocation for audit
+    await db.from("transaction_revocations").insert({
+      ledger_entry_id: id,
+      uid: entry.uid,
+      admin_uid: adminUser.uid,
+      reason,
+      amount_reversed: reversalAmount,
+      asset: entry.asset,
+    });
+
+    // If the original entry has a reference_id (deposit/withdrawal), mark it as revoked
+    if (entry.reference_id) {
+      await db.from("deposits").update({ status: "failed" }).eq("id", entry.reference_id).catch(() => undefined);
+      await db.from("withdrawals").update({ status: "failed" }).eq("id", entry.reference_id).catch(() => undefined);
+    }
+
+    // Invalidate wallet cache
+    const { redis } = await import("@/lib/redis/client");
+    await redis.del(`wallet:info:${entry.uid}`);
+
+    return c.json({
+      success: true,
+      data: {
+        ledgerEntryId: id,
+        uid: entry.uid,
+        asset: entry.asset,
+        originalAmount: entry.amount,
+        reversalAmount,
+        balanceBefore: currentBalance,
+        balanceAfter: newBalance,
+        reason,
+      },
+    });
+  }
+);
+
+/* ─── PATCH /users/:uid/balance — manual adjustment (requires fund password) */
+// Override with fund password requirement (replaces the existing route above)
+
 export default admin;

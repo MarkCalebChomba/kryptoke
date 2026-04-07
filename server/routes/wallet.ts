@@ -60,6 +60,13 @@ wallet.get("/info", async (c) => {
     (b) => b.asset === "USDT" && b.account === "funding"
   )?.amount ?? "0";
 
+  // All account balances grouped: { funding: { USDT: "x", KES: "y" }, trading: { USDT: "z" }, earn: { USDT: "q" } }
+  const accountBalances: Record<string, Record<string, string>> = {};
+  for (const b of balanceRows) {
+    if (!accountBalances[b.account]) accountBalances[b.account] = {};
+    accountBalances[b.account]![b.asset] = b.amount;
+  }
+
   const info: WalletInfo = {
     depositAddress: userRow.deposit_address,
     bnbBalance,
@@ -68,7 +75,14 @@ wallet.get("/info", async (c) => {
     kycStatus: userRow.kyc_status,
   };
 
-  const response = { ...info, rate };
+  const response = {
+    ...info,
+    rate,
+    accountBalances,
+    fundPasswordSet: !!(userRow.asset_pin_hash),
+    suspendedUntil: userRow.suspended_until ?? null,
+    suspensionReason: userRow.suspension_reason ?? null,
+  };
   // Cache for 5s — invalidated on deposit/withdrawal
   await redis.set(cacheKey, response, { ex: 5 }).catch(() => undefined);
 

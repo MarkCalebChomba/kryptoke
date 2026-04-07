@@ -242,7 +242,12 @@ function P2PSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void })
 export default function WalletPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const { totalKes, totalUsd, kesBalance, usdtBalance, bnbBalance, rate, isLoading } = useWallet();
+  const walletInfo = useWallet();
+  const { totalKes, totalUsd, kesBalance, usdtBalance, bnbBalance, rate, isLoading } = walletInfo;
+  const accountBalances = (walletInfo as unknown as { accountBalances?: Record<string, Record<string, string>> }).accountBalances ?? {};
+  const suspendedUntil = (walletInfo as unknown as { suspendedUntil?: string | null }).suspendedUntil;
+  const suspensionReason = (walletInfo as unknown as { suspensionReason?: string | null }).suspensionReason;
+  const isSuspended = !!(suspendedUntil && new Date(suspendedUntil) > new Date());
 
   // Read ?highlight=<txId> from notification deep-link
   const searchParams = typeof window !== "undefined"
@@ -314,6 +319,20 @@ export default function WalletPage() {
         </button>
       </div>
 
+      {/* Suspension banner */}
+      {isSuspended && (
+        <div className="mx-4 mt-4 px-4 py-3 rounded-2xl bg-down/8 border border-down/25 flex items-start gap-3">
+          <span className="text-xl mt-0.5">🚫</span>
+          <div>
+            <p className="font-outfit text-sm font-semibold text-down">Account Suspended</p>
+            <p className="font-outfit text-xs text-text-secondary mt-0.5 leading-relaxed">{suspensionReason ?? "Your account has been suspended."}</p>
+            <p className="font-outfit text-[10px] text-text-muted mt-1">
+              Access restored: {new Date(suspendedUntil!).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Total balance card */}
       <div className="mx-4 mt-4 card">
         <div className="flex items-start justify-between mb-1">
@@ -335,16 +354,43 @@ export default function WalletPage() {
           </>
         )}
 
+        {/* Per-account balance breakdown */}
+        {!isLoading && Object.keys(accountBalances).length > 0 && (
+          <div className="mt-3 pt-3 border-t border-border/50 grid grid-cols-3 gap-2">
+            {(["funding", "trading", "earn"] as const).map((acct) => {
+              const bals = accountBalances[acct] ?? {};
+              const usdt = parseFloat(bals["USDT"] ?? "0");
+              const kes = parseFloat(bals["KES"] ?? "0");
+              const hasAny = usdt > 0 || kes > 0;
+              return (
+                <div key={acct} className="bg-bg-surface2 rounded-xl px-2.5 py-2">
+                  <p className="font-outfit text-[9px] text-text-muted uppercase tracking-wide capitalize">{acct}</p>
+                  {hidden ? (
+                    <p className="font-price text-xs text-text-muted mt-0.5">••••</p>
+                  ) : hasAny ? (
+                    <>
+                      {usdt > 0 && <p className="font-price text-xs text-text-primary mt-0.5">{usdt.toFixed(2)} <span className="text-text-muted">USDT</span></p>}
+                      {kes > 0 && <p className="font-price text-xs text-text-primary">{kes.toFixed(0)} <span className="text-text-muted">KES</span></p>}
+                    </>
+                  ) : (
+                    <p className="font-price text-xs text-text-muted mt-0.5">0.00</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* Action buttons */}
         <div className="grid grid-cols-4 gap-2 mt-4">
           {[
             { icon: IconDeposit,  label: "Deposit",  color: "text-up",      action: () => router.push("/") },
-            { icon: IconWithdraw, label: "Withdraw", color: "text-down",    action: () => router.push("/withdraw") },
-            { icon: IconTransfer, label: "Transfer", color: "text-primary", action: () => setInternalOpen(true) },
-            { icon: IconSend,     label: "Send",     color: "text-gold",    action: () => setP2pOpen(true) },
+            { icon: IconWithdraw, label: "Withdraw", color: isSuspended ? "text-text-muted" : "text-down",    action: () => isSuspended ? undefined : router.push("/withdraw") },
+            { icon: IconTransfer, label: "Transfer", color: isSuspended ? "text-text-muted" : "text-primary", action: () => isSuspended ? undefined : setInternalOpen(true) },
+            { icon: IconSend,     label: "Send",     color: isSuspended ? "text-text-muted" : "text-gold",    action: () => isSuspended ? undefined : setP2pOpen(true) },
           ].map(({ icon: Icon, label, color, action }) => (
             <button key={label} onClick={action}
-              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl bg-bg-surface2 border border-border active:scale-95 transition-transform">
+              className={cn("flex flex-col items-center gap-1.5 py-2.5 rounded-xl bg-bg-surface2 border border-border active:scale-95 transition-transform", isSuspended && label !== "Deposit" && "opacity-40 cursor-not-allowed")}>
               <Icon size={18} className={color} />
               <span className={`font-outfit text-[10px] font-semibold ${color}`}>{label}</span>
             </button>

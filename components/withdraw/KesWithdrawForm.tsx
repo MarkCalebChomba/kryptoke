@@ -25,7 +25,11 @@ type View = "form" | "pin" | "processing" | "success" | "failed";
 export function KesWithdrawForm() {
   const router = useRouter();
   const { user } = useAuth();
-  const { kesBalance } = useWallet();
+  const walletData = useWallet();
+  const { kesBalance } = walletData;
+  const suspendedUntil = (walletData as unknown as { suspendedUntil?: string | null }).suspendedUntil;
+  const suspensionReason = (walletData as unknown as { suspensionReason?: string | null }).suspensionReason;
+  const kycStatus = walletData.kycStatus;
   const { data: limits } = useWithdrawLimits();
   const withdraw = useKesWithdraw();
 
@@ -35,6 +39,13 @@ export function KesWithdrawForm() {
     queryFn: () => apiGet<{ fundPasswordSet: boolean }>("/account/security-status"),
     staleTime: 60_000,
   });
+
+  // Pre-compute all blocking conditions with clear user-facing reasons
+  const isSuspended = !!(suspendedUntil && new Date(suspendedUntil) > new Date());
+  const isKycBlocked = kycStatus === "pending";
+  const isLimitHit = parseFloat(limits?.remaining ?? "150000") <= 0;
+  const hasNoBalance = parseFloat(kesBalance) <= 0;
+  const fundPasswordMissing = secStatus && !secStatus.fundPasswordSet;
 
   const [view, setView] = useState<View>("form");
   const [amount, setAmount] = useState("");
@@ -154,26 +165,72 @@ export function KesWithdrawForm() {
     );
   }
 
-  // Fund password not set — block access and guide user to set it
-  if (secStatus && !secStatus.fundPasswordSet) {
+  // Unified blocker — show the most critical reason first
+  const blocker = isSuspended
+    ? {
+        icon: "🚫",
+        color: "down",
+        title: "Account Suspended",
+        body: suspensionReason ?? "Your account has been suspended.",
+        sub: `Access restored ${new Date(suspendedUntil!).toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}`,
+        cta: null,
+      }
+    : fundPasswordMissing
+    ? {
+        icon: "🔑",
+        color: "gold",
+        title: "Fund Password Required",
+        body: "Set a 6-digit fund password before you can make withdrawals.",
+        sub: "Settings → Security Center → Fund Password",
+        cta: { label: "Set Fund Password", action: () => router.push("/security") },
+      }
+    : isKycBlocked
+    ? {
+        icon: "🪪",
+        color: "gold",
+        title: "Identity Verification Required",
+        body: "You need to complete KYC verification before withdrawing. This protects your account and complies with financial regulations.",
+        sub: null,
+        cta: { label: "Verify Identity", action: () => router.push("/kyc") },
+      }
+    : isLimitHit
+    ? {
+        icon: "📊",
+        color: "gold",
+        title: "Daily Limit Reached",
+        body: `You've used your full daily withdrawal limit of KSh ${parseFloat(limits?.dailyLimit ?? "150000").toLocaleString()}. Limit resets at midnight.`,
+        sub: `Used today: KSh ${parseFloat(limits?.usedToday ?? "0").toLocaleString()}`,
+        cta: null,
+      }
+    : hasNoBalance
+    ? {
+        icon: "💳",
+        color: "down",
+        title: "Insufficient KES Balance",
+        body: "You don't have any KES balance to withdraw. Deposit funds first or convert USDT to KES via the Convert tab.",
+        sub: null,
+        cta: { label: "Deposit Funds", action: () => router.push("/deposit") },
+      }
+    : null;
+
+  if (blocker) {
+    const borderColor = blocker.color === "down" ? "border-down/20 bg-down/5" : "border-gold/20 bg-gold/5";
+    const iconBg = blocker.color === "down" ? "bg-down/10 border-down/20" : "bg-gold/10 border-gold/20";
+    const textColor = blocker.color === "down" ? "text-down" : "text-gold";
     return (
       <div className="px-4 py-10 flex flex-col items-center text-center">
-        <div className="w-16 h-16 rounded-2xl bg-gold/10 border border-gold/30 flex items-center justify-center mb-5">
-          <span className="text-3xl">🔑</span>
+        <div className={`w-16 h-16 rounded-2xl ${iconBg} border flex items-center justify-center mb-5`}>
+          <span className="text-3xl">{blocker.icon}</span>
         </div>
-        <h3 className="font-syne font-bold text-lg text-text-primary mb-2">Fund Password Required</h3>
-        <p className="font-outfit text-sm text-text-muted leading-relaxed mb-6 max-w-xs">
-          You need to set a 6-digit fund password before you can make withdrawals. This protects your funds from unauthorized access.
-        </p>
-        <button
-          onClick={() => router.push("/security")}
-          className="btn-primary max-w-xs w-full mb-3"
-        >
-          Set Fund Password
-        </button>
-        <p className="font-outfit text-xs text-text-muted">
-          Settings → Security Center → Fund Password
-        </p>
+        <h3 className="font-syne font-bold text-lg text-text-primary mb-2">{blocker.title}</h3>
+        <p className="font-outfit text-sm text-text-muted leading-relaxed mb-2 max-w-xs">{blocker.body}</p>
+        {blocker.sub && <p className={`font-outfit text-xs ${textColor} mb-6`}>{blocker.sub}</p>}
+        {!blocker.sub && <div className="mb-6" />}
+        {blocker.cta && (
+          <button onClick={blocker.cta.action} className="btn-primary max-w-xs w-full">
+            {blocker.cta.label}
+          </button>
+        )}
       </div>
     );
   }
