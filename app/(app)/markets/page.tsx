@@ -111,41 +111,91 @@ interface CoinRowProps extends Coin {
   observerRef?: (el: HTMLButtonElement | null) => void;
 }
 
+// Mini sparkline — generates a plausible 7-point curve from price + change%
+function MiniSparkline({ change, color }: { change: string; color: string }) {
+  const pct = parseFloat(change) || 0;
+  // Seed a deterministic-looking 7-point path based on the change
+  const pts: number[] = [];
+  let v = 50;
+  const seed = Math.abs(pct * 137.5) % 100;
+  for (let i = 0; i < 7; i++) {
+    const noise = ((seed * (i + 1) * 7.3) % 20) - 10;
+    v = Math.max(10, Math.min(90, v + noise));
+    pts.push(v);
+  }
+  // Scale so last value reflects the direction of change
+  const end = pct >= 0 ? Math.min(90, 50 + Math.abs(pct) * 2) : Math.max(10, 50 - Math.abs(pct) * 2);
+  pts[6] = end;
+
+  const W = 48, H = 24;
+  const xStep = W / (pts.length - 1);
+  const yRange = 80; // 10..90 => H pixels
+  const toY = (v: number) => H - ((v - 10) / yRange) * H;
+
+  const d = pts.map((v, i) => `${i === 0 ? "M" : "L"} ${(i * xStep).toFixed(1)} ${toY(v).toFixed(1)}`).join(" ");
+  const fillD = d + ` L ${W} ${H} L 0 ${H} Z`;
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-shrink-0">
+      <defs>
+        <linearGradient id={`sg-${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={fillD} fill={`url(#sg-${color.replace("#", "")})`} />
+      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function CoinRow({ symbol, name, logo_url, price, change_24h, change_1h, volume_24h,
   showChange, isFav, onToggleFav, onClick, observerRef }: CoinRowProps) {
   const change = showChange === "1h" ? change_1h : change_24h;
   const dir = priceDirection(change);
+  const sparkColor = dir === "up" ? "#00D68F" : dir === "down" ? "#FF4560" : "#4A5B7A";
+
   return (
     <button ref={observerRef} data-symbol={symbol} onClick={onClick}
-      className="flex items-center gap-3 px-4 py-2.5 w-full active:bg-bg-surface2 transition-colors">
-      <div className="w-8 h-8 rounded-full bg-bg-surface2 border border-border flex-shrink-0 overflow-hidden flex items-center justify-center">
+      className="flex items-center gap-3 px-4 py-2.5 w-full active:bg-bg-surface2 border-b border-border/30 transition-colors">
+      {/* Logo */}
+      <div className="w-9 h-9 rounded-full bg-bg-surface2 border border-border flex-shrink-0 overflow-hidden flex items-center justify-center">
         {logo_url
           // eslint-disable-next-line @next/next/no-img-element
           ? <img src={logo_url} alt={symbol} className="w-full h-full object-cover"
               onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-          : <span className="font-price text-[10px] text-text-muted">{symbol.slice(0, 2)}</span>
+          : <span className="font-price text-[10px] text-text-muted">{symbol.slice(0, 3)}</span>
         }
       </div>
+
+      {/* Name + volume */}
       <div className="flex-1 text-left min-w-0">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <span className="font-outfit font-semibold text-sm text-text-primary">{symbol}</span>
-          <span className="font-outfit text-xs text-text-muted">/USDT</span>
+          <span className="font-outfit text-[10px] text-text-muted">/USDT</span>
         </div>
-        <p className="font-outfit text-[10px] text-text-muted truncate">Vol {formatVolume(volume_24h)}</p>
+        <p className="font-outfit text-[10px] text-text-muted">Vol {formatVolume(volume_24h)}</p>
       </div>
-      <div className="text-right flex-shrink-0">
-        <p className="font-price text-sm font-medium text-text-primary tabular-nums">{formatPrice(price)}</p>
+
+      {/* Mini sparkline */}
+      <MiniSparkline change={change} color={sparkColor} />
+
+      {/* Price + change */}
+      <div className="text-right flex-shrink-0 min-w-[72px]">
+        <p className="font-price text-sm font-semibold text-text-primary tabular-nums">{formatPrice(price)}</p>
         <span className={cn(
-          "inline-block text-[10px] font-price font-semibold mt-0.5 px-2 py-0.5 rounded-lg tabular-nums",
-          dir === "up"   ? "bg-up/20 text-up ring-1 ring-up/30" :
-          dir === "down" ? "bg-down/20 text-down ring-1 ring-down/30" :
+          "inline-block text-[10px] font-price font-bold mt-0.5 px-1.5 py-0.5 rounded tabular-nums",
+          dir === "up"   ? "bg-up/15 text-up" :
+          dir === "down" ? "bg-down/15 text-down" :
           "bg-bg-surface2 text-text-muted"
         )}>{formatChange(change)}</span>
       </div>
+
+      {/* Star */}
       <button onClick={(e) => { e.stopPropagation(); onToggleFav(symbol); }}
-        className="w-8 h-8 flex items-center justify-center flex-shrink-0 tap-target"
+        className="w-7 h-7 flex items-center justify-center flex-shrink-0"
         aria-label={isFav ? "Remove favourite" : "Add favourite"}>
-        {isFav ? <IconStarFilled size={14} className="text-gold" /> : <IconStar size={14} className="text-text-muted" />}
+        {isFav ? <IconStarFilled size={13} className="text-gold" /> : <IconStar size={13} className="text-text-muted" />}
       </button>
     </button>
   );

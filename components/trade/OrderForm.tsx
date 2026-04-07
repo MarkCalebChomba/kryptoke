@@ -172,194 +172,110 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick, externalPrice,
     quoteQuery.isPending;
 
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div className="flex flex-col gap-2 p-2">
       {/* Buy / Sell toggle */}
-      <div className="flex rounded-xl overflow-hidden border border-border">
-        <button
-          onClick={() => setSide("buy")}
-          className={cn(
-            "flex-1 py-2.5 font-outfit font-semibold text-sm transition-all",
-            isBuy ? "bg-up text-bg" : "text-text-muted"
-          )}
-        >
+      <div className="flex rounded-lg overflow-hidden border border-border">
+        <button onClick={() => setSide("buy")}
+          className={cn("flex-1 py-2 font-outfit font-semibold text-xs transition-all",
+            isBuy ? "bg-up text-white" : "text-text-muted")}>
           Buy
         </button>
-        <button
-          onClick={() => setSide("sell")}
-          className={cn(
-            "flex-1 py-2.5 font-outfit font-semibold text-sm transition-all",
-            !isBuy ? "bg-down text-white" : "text-text-muted"
-          )}
-        >
+        <button onClick={() => setSide("sell")}
+          className={cn("flex-1 py-2 font-outfit font-semibold text-xs transition-all",
+            !isBuy ? "bg-down text-white" : "text-text-muted")}>
           Sell
         </button>
       </div>
 
-      {/* Order type selector */}
-      <button
-        onClick={() => setOrderTypeSheetOpen(true)}
-        className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-bg-surface2 border border-border"
-      >
-        <span className="font-outfit text-sm text-text-primary">
-          {ORDER_TYPE_LABELS[orderType]}
-        </span>
-        <IconChevronDown size={16} className="text-text-muted" />
+      {/* Order type — compact pill */}
+      <button onClick={() => setOrderTypeSheetOpen(true)}
+        className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-bg-surface2 border border-border">
+        <span className="font-outfit text-xs text-text-primary">{ORDER_TYPE_LABELS[orderType]}</span>
+        <IconChevronDown size={13} className="text-text-muted" />
       </button>
 
-      {/* Price input — hidden for market orders */}
+      {/* Price input */}
       {orderType !== "market" && (
-        <div>
-          <label className="block font-outfit text-xs text-text-muted mb-1.5">
-            {orderType === "tp_sl" ? "Limit Price (USDT)" : "Price (USDT)"}
-          </label>
-          <div className="relative">
-            <input
-              type="text" inputMode="decimal"
-              value={price}
-              onChange={(e) => setPrice(sanitizeNumberInput(e.target.value))}
-              className="input-field font-price pr-16"
-              placeholder={formatPrice(livePrice)}
-            />
-            <button
-              onClick={handleBbo}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-primary font-outfit text-xs font-semibold bg-primary/10 px-2 py-1 rounded-lg"
-            >
-              BBO
-            </button>
-          </div>
+        <div className="relative">
+          <input type="text" inputMode="decimal" value={price}
+            onChange={(e) => setPrice(sanitizeNumberInput(e.target.value))}
+            className="input-field font-price text-sm py-2 pr-12"
+            placeholder={`Price: ${formatPrice(livePrice)}`} />
+          <button onClick={handleBbo}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-primary font-outfit text-[10px] font-bold bg-primary/10 px-1.5 py-0.5 rounded">
+            BBO
+          </button>
         </div>
       )}
 
       {orderType === "market" && (
-        <div className="px-3 py-2.5 rounded-xl bg-bg-surface2 border border-border">
-          <p className="font-outfit text-xs text-text-muted">Market price</p>
-          <p className="font-price text-sm text-text-primary">{formatPrice(livePrice)} USDT</p>
+        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-bg-surface2 border border-border">
+          <span className="font-outfit text-xs text-text-muted">Market</span>
+          <span className="font-price text-xs text-text-primary">{formatPrice(livePrice)} USDT</span>
         </div>
       )}
 
       {/* Amount input */}
-      <div>
-        <label className="block font-outfit text-xs text-text-muted mb-1.5">
-          Amount ({symbol})
-        </label>
-        <input
-          type="text" inputMode="decimal"
-          value={amount}
-          onChange={(e) => {
-            setAmount(sanitizeNumberInput(e.target.value));
-            setSliderPct(0);
-          }}
-          className="input-field font-price"
-          placeholder="0.0000"
-        />
-      </div>
+      <input type="text" inputMode="decimal" value={amount}
+        onChange={(e) => { setAmount(sanitizeNumberInput(e.target.value)); setSliderPct(0); }}
+        className="input-field font-price text-sm py-2"
+        placeholder={`Amount (${symbol})`} />
 
-      {/* Trigger price — for trigger and trailing_stop order types */}
+      {/* Trigger price */}
       {(orderType === "trigger" || orderType === "trailing_stop") && (
-        <div>
-          <label className="block font-outfit text-xs text-text-muted mb-1.5">
-            {orderType === "trailing_stop" ? "Callback Rate (%)" : "Trigger Price (USDT)"}
-          </label>
-          <input
-            type="text" inputMode="decimal"
-            value={triggerPrice}
-            onChange={(e) => setTriggerPrice(sanitizeNumberInput(e.target.value))}
-            className="input-field font-price"
-            placeholder={orderType === "trailing_stop" ? "e.g. 1.5" : formatPrice(livePrice)}
-          />
-        </div>
+        <input type="text" inputMode="decimal" value={triggerPrice}
+          onChange={(e) => setTriggerPrice(sanitizeNumberInput(e.target.value))}
+          className="input-field font-price text-sm py-2"
+          placeholder={orderType === "trailing_stop" ? "Callback rate %" : "Trigger price"} />
       )}
 
       {/* TP / SL fields */}
       {orderType === "tp_sl" && (
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="block font-outfit text-xs text-up mb-1.5">Take Profit</label>
-            <input
-              type="text" inputMode="decimal"
-              value={tpPrice}
-              onChange={(e) => setTpPrice(sanitizeNumberInput(e.target.value))}
-              className="input-field font-price border-up/30 focus:border-up/60"
-              placeholder="TP price"
-            />
-          </div>
-          <div>
-            <label className="block font-outfit text-xs text-down mb-1.5">Stop Loss</label>
-            <input
-              type="text" inputMode="decimal"
-              value={slPrice}
-              onChange={(e) => setSlPrice(sanitizeNumberInput(e.target.value))}
-              className="input-field font-price border-down/30 focus:border-down/60"
-              placeholder="SL price"
-            />
-          </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <input type="text" inputMode="decimal" value={tpPrice}
+            onChange={(e) => setTpPrice(sanitizeNumberInput(e.target.value))}
+            className="input-field font-price text-sm py-2 border-up/30 focus:border-up/60" placeholder="Take profit" />
+          <input type="text" inputMode="decimal" value={slPrice}
+            onChange={(e) => setSlPrice(sanitizeNumberInput(e.target.value))}
+            className="input-field font-price text-sm py-2 border-down/30 focus:border-down/60" placeholder="Stop loss" />
         </div>
       )}
 
-      {/* Percentage slider */}
-      <div>
-        <input
-          type="range"
-          min={0} max={100} step={25}
-          value={sliderPct}
-          onChange={(e) => setSliderPct(parseInt(e.target.value))}
-          className="w-full h-1 bg-border rounded-full appearance-none cursor-pointer accent-primary"
-        />
-        <div className="flex justify-between mt-1">
-          {[0, 25, 50, 75, 100].map((pct) => (
-            <button
-              key={pct}
-              onClick={() => setSliderPct(pct)}
-              className={cn(
-                "font-outfit text-[10px] transition-colors",
-                sliderPct === pct ? "text-primary" : "text-text-muted"
-              )}
-            >
-              {pct === 0 ? "0%" : pct === 100 ? "Max" : `${pct}%`}
-            </button>
-          ))}
-        </div>
+      {/* % quick-select row */}
+      <div className="flex gap-1">
+        {[0, 25, 50, 75, 100].map((pct) => (
+          <button key={pct} onClick={() => setSliderPct(pct)}
+            className={cn("flex-1 py-1 rounded font-outfit text-[10px] border transition-colors",
+              sliderPct === pct ? "border-primary/50 text-primary bg-primary/10" : "border-border text-text-muted")}>
+            {pct === 0 ? "0" : pct === 100 ? "Max" : `${pct}%`}
+          </button>
+        ))}
       </div>
 
-      {/* Total */}
-      {total && (
-        <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-bg-surface2 border border-border">
-          <span className="font-outfit text-xs text-text-muted">Total</span>
-          <span className="font-price text-sm text-text-primary">
-            {parseFloat(total).toFixed(4)} USDT
-          </span>
-        </div>
-      )}
-
-      {/* Available */}
-      <div className="flex items-center justify-between">
-        <span className="font-outfit text-xs text-text-muted">
-          Available: <span className="font-price text-text-secondary">
-            {parseFloat(available).toFixed(4)} {isBuy ? "USDT" : symbol}
+      {/* Total + available row */}
+      <div className="flex items-center justify-between px-1">
+        <span className="font-outfit text-[10px] text-text-muted">
+          Avail: <span className="font-price text-text-secondary">
+            {parseFloat(available).toFixed(3)} {isBuy ? "USDT" : symbol}
           </span>
         </span>
-        <button
-          onClick={onDepositClick}
-          className="flex items-center gap-1 text-primary font-outfit text-xs font-medium"
-        >
-          <IconPlus size={12} />
-          Deposit
+        {total && (
+          <span className="font-price text-[10px] text-text-secondary">
+            ≈ {parseFloat(total).toFixed(2)} USDT
+          </span>
+        )}
+        <button onClick={onDepositClick}
+          className="flex items-center gap-0.5 text-primary font-outfit text-[10px] font-medium">
+          <IconPlus size={10} />Dep
         </button>
       </div>
 
       {/* Submit */}
-      <button
-        onClick={handleSubmit}
-        disabled={submitDisabled}
-        className={cn(
-          "w-full py-3.5 rounded-xl font-outfit font-semibold text-sm transition-all active:scale-[0.98]",
+      <button onClick={handleSubmit} disabled={submitDisabled}
+        className={cn("w-full py-2.5 rounded-xl font-outfit font-bold text-xs transition-all active:scale-[0.98]",
           submitDisabled && "opacity-50 cursor-not-allowed",
-          isBuy ? "btn-buy" : "btn-sell"
-        )}
-      >
-        {quoteQuery.isPending
-          ? "Getting quote..."
-          : `${isBuy ? "Buy" : "Sell"} ${symbol}`}
+          isBuy ? "btn-buy" : "btn-sell")}>
+        {quoteQuery.isPending ? "Quoting…" : `${isBuy ? "Buy" : "Sell"} ${symbol}`}
       </button>
 
       {/* Sheets */}
