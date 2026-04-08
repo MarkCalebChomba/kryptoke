@@ -148,13 +148,16 @@ function InternalTransferSheet({ isOpen, onClose }: { isOpen: boolean; onClose: 
 function P2PSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const toast = useToastActions();
   const qc = useQueryClient();
-  const { usdtBalance } = useWallet();
+  const { usdtBalance, kesBalance } = useWallet();
   const [step, setStep] = useState<"form" | "pin">("form");
   const [recipient, setRecipient] = useState("");
   const [asset, setAsset] = useState("USDT");
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
+
+  // Correct balance for the selected asset
+  const availableBalance = asset === "KES" ? kesBalance : usdtBalance;
 
   const send = useMutation({
     mutationFn: (assetPin: string) =>
@@ -188,7 +191,10 @@ function P2PSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void })
     );
   }
 
-  const canSend = recipient.length >= 3 && parseFloat(amount) > 0 && parseFloat(amount) <= parseFloat(usdtBalance);
+  const canSend =
+    recipient.length >= 3 &&
+    parseFloat(amount) > 0 &&
+    parseFloat(amount) <= parseFloat(availableBalance);
 
   return (
     <BottomSheet isOpen={isOpen} onClose={onClose} title="Send to User" showCloseButton>
@@ -203,7 +209,7 @@ function P2PSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void })
           <label className="block font-outfit text-xs text-text-secondary mb-1.5">Asset</label>
           <div className="flex gap-2">
             {["USDT", "KES"].map((a) => (
-              <button key={a} onClick={() => setAsset(a)}
+              <button key={a} onClick={() => { setAsset(a); setAmount(""); }}
                 className={cn("flex-1 py-2.5 rounded-xl font-outfit text-sm font-semibold border transition-all",
                   asset === a ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-text-muted")}>
                 {a}
@@ -214,7 +220,9 @@ function P2PSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void })
         <div>
           <div className="flex justify-between mb-1.5">
             <label className="font-outfit text-xs text-text-secondary">Amount</label>
-            <span className="font-outfit text-xs text-text-muted">Balance: {parseFloat(usdtBalance).toFixed(4)} {asset}</span>
+            <span className="font-outfit text-xs text-text-muted">
+              Balance: {parseFloat(availableBalance).toFixed(asset === "KES" ? 2 : 4)} {asset}
+            </span>
           </div>
           <input type="text" inputMode="decimal" value={amount}
             onChange={(e) => setAmount(sanitizeNumberInput(e.target.value, 6))}

@@ -28,6 +28,10 @@ export async function signJwt(payload: JwtPayload): Promise<string> {
     .setExpirationTime("7d")
     .setIssuer("kryptoke")
     .setAudience("kryptoke-app")
+    // sub = uid so Supabase auth.uid() works when this JWT is passed
+    // to the Supabase browser client for Realtime subscriptions.
+    // See: supabase/migrations/012_rls_custom_jwt.sql
+    .setSubject(payload.uid)
     .sign(secret);
 }
 

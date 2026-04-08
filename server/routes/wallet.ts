@@ -188,6 +188,7 @@ wallet.post(
     const { uid } = c.get("user");
     const { recipientIdentifier, asset, amount, assetPin, note } = c.req.valid("json");
     const db = getDb();
+    const { redis } = await import("@/lib/redis/client");
 
     // ── PIN check ────────────────────────────────────────────────────────────
     const sender = await findUserByUid(uid);
@@ -209,36 +210,91 @@ wallet.post(
       return c.json({ success: false, error: "Recipient not found. Check the UID or email.", statusCode: 404 }, 404);
     }
 
-    // ── Balance check ─────────────────────────────────────────────────────────
-    const senderBalance = await getBalance(uid, asset, "funding");
-    const { valid, error: amtErr } = validateAmount(amount, "0.000001", senderBalance, senderBalance);
-    if (!valid) return c.json({ success: false, error: amtErr ?? "Invalid amount", statusCode: 400 }, 400);
+    // ── Acquire per-user advisory lock to prevent double-spend race condition ─
+    // Both sender and recipient locks acquired in consistent order (sorted by uid)
+    // to avoid deadlock.
+    const lockKeys = [uid, recipient.uid].sort().map((id) => `transfer_lock:${id}`);
+    const lockTtl = 10; // seconds
 
-    // ── Atomic transfer ───────────────────────────────────────────────────────
-    const newSenderBal = subtract(senderBalance, amount);
-    await upsertBalance(uid, asset, newSenderBal, "funding");
+    // Attempt to acquire both locks atomically via SET NX
+    const [lock1, lock2] = await Promise.all(
+      lockKeys.map((k) => redis.set(k, "1", { nx: true, ex: lockTtl }))
+    );
 
-    const recipientBal = await getBalance(recipient.uid, asset, "funding");
-    await upsertBalance(recipient.uid, asset, add(recipientBal, amount), "funding");
+    if (!lock1 || !lock2) {
+      // Release any lock we did acquire
+      await Promise.all(
+        lockKeys.map((k) => redis.del(k).catch(() => undefined))
+      );
+      return c.json({
+        success: false,
+        error: "Another transfer is in progress. Please wait a moment and try again.",
+        statusCode: 429,
+      }, 429);
+    }
 
-    const transferNote = note?.trim() || `P2P transfer to ${recipient.display_name ?? recipient.uid}`;
+    try {
+      // ── Balance check (inside lock) ─────────────────────────────────────────
+      const senderBalance = await getBalance(uid, asset, "funding");
+      const { valid, error: amtErr } = validateAmount(amount, "0.000001", senderBalance, senderBalance);
+      if (!valid) return c.json({ success: false, error: amtErr ?? "Invalid amount", statusCode: 400 }, 400);
 
-    await Promise.all([
-      createLedgerEntry({ uid, asset, amount: `-${amount}`, type: "transfer", note: transferNote }),
-      createLedgerEntry({ uid: recipient.uid, asset, amount, type: "transfer",
-        note: `P2P transfer from ${sender.display_name ?? uid}${note ? `: ${note}` : ""}` }),
-    ]);
+      // ── Debit sender ────────────────────────────────────────────────────────
+      const newSenderBal = subtract(senderBalance, amount);
+      await upsertBalance(uid, asset, newSenderBal, "funding");
 
-    return c.json({
-      success: true,
-      data: {
-        recipient: { displayName: recipient.display_name ?? "KryptoKe User", uid: recipient.uid },
-        asset,
-        amount,
-        newBalance: newSenderBal,
-        message: `${amount} ${asset} sent to ${recipient.display_name ?? recipient.uid}`,
-      },
-    });
+      // ── Credit recipient ────────────────────────────────────────────────────
+      const recipientBal = await getBalance(recipient.uid, asset, "funding");
+      const newRecipientBal = add(recipientBal, amount);
+      await upsertBalance(recipient.uid, asset, newRecipientBal, "funding");
+
+      const transferNote = note?.trim() || `P2P transfer to ${recipient.display_name ?? recipient.uid}`;
+
+      // ── Ledger entries ──────────────────────────────────────────────────────
+      await Promise.all([
+        createLedgerEntry({ uid, asset, amount: `-${amount}`, type: "transfer", note: transferNote }),
+        createLedgerEntry({
+          uid: recipient.uid, asset, amount, type: "transfer",
+          note: `P2P transfer from ${sender.display_name ?? uid}${note ? `: ${note}` : ""}`,
+        }),
+      ]);
+
+      // ── Bust wallet info cache for both parties ──────────────────────────────
+      await Promise.all([
+        redis.del(`wallet:info:${uid}`).catch(() => undefined),
+        redis.del(`wallet:info:${recipient.uid}`).catch(() => undefined),
+      ]);
+
+      // ── In-app notification for recipient (fire-and-forget) ─────────────────
+      (async () => {
+        try {
+          await db.from("notifications").insert({
+            uid: recipient.uid,
+            type: "transfer_received",
+            title: "Transfer received",
+            body: `You received ${amount} ${asset} from ${sender.display_name ?? "a KryptoKe user"}${note ? `: "${note}"` : ""}`,
+            read: false,
+            created_at: new Date().toISOString(),
+          });
+        } catch {
+          // Non-fatal — transfer already completed
+        }
+      })();
+
+      return c.json({
+        success: true,
+        data: {
+          recipient: { displayName: recipient.display_name ?? "KryptoKe User", uid: recipient.uid },
+          asset,
+          amount,
+          newBalance: newSenderBal,
+          message: `${amount} ${asset} sent to ${recipient.display_name ?? recipient.uid}`,
+        },
+      });
+    } finally {
+      // Always release locks
+      await Promise.all(lockKeys.map((k) => redis.del(k).catch(() => undefined)));
+    }
   }
 );
 

@@ -331,7 +331,9 @@ Update this section when you complete or start a task. Format:
 (no updates yet)
 
 # SHIELD STATUS
-(no updates yet)
+[SHIELD] [2026-04-08] Task 8 DONE — Migration 012_rls_custom_jwt.sql: replaced all auth.uid() RLS policies with get_app_uid() that reads request.jwt.claims->>'uid'. Added .setSubject(uid) to JWT. PREREQ: Supabase JWT secret must match JWT_SECRET in Vercel env.
+[SHIELD] [2026-04-08] Task 9 DONE — transfer-to-user: added Redis advisory lock (prevents double-spend race), recipient wallet cache bust, in-app notification INSERT for recipient. Fixed P2PSheet canSend bug (was always checking usdtBalance even for KES transfers).
+[SHIELD] [2026-04-08] Task 13 DONE — useRealtimeBalances hook: subscribes to balances+notifications tables via Supabase Realtime, updates Zustand store live. useSupabaseSession injects custom JWT into Supabase browser client. Both wired into AppLayout via AuthenticatedShell.
 
 # PULSE STATUS
 (no updates yet)

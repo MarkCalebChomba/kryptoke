@@ -6,10 +6,30 @@ import { useAppStore } from "@/lib/store";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { useSupabaseSession, useRealtimeBalances } from "@/lib/hooks/useRealtimeBalances";
+
+// ── Inner component — only mounts when authenticated ─────────────────────────
+// Keeps hooks from running before the user is ready.
+function AuthenticatedShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  // Inject custom JWT into Supabase client so Realtime RLS passes
+  useSupabaseSession();
+  // Subscribe to live balance + notification updates
+  useRealtimeBalances();
+
+  return (
+    <div className="relative w-full h-dvh overflow-hidden bg-bg" suppressHydrationWarning>
+      <main className="absolute inset-0 overflow-hidden">
+        <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
+      </main>
+      <BottomNav />
+    </div>
+  );
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
   const { isAuthenticated, isLoadingAuth } = useAppStore((s) => ({
     isAuthenticated: s.isAuthenticated,
     isLoadingAuth: s.isLoadingAuth,
@@ -37,12 +57,5 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) return null;
 
-  return (
-    <div className="relative w-full h-dvh overflow-hidden bg-bg" suppressHydrationWarning>
-      <main className="absolute inset-0 overflow-hidden">
-        <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
-      </main>
-      <BottomNav />
-    </div>
-  );
+  return <AuthenticatedShell>{children}</AuthenticatedShell>;
 }
