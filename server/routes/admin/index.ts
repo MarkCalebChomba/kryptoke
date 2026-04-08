@@ -1487,4 +1487,136 @@ admin.post(
 /* ─── PATCH /users/:uid/balance — manual adjustment (requires fund password) */
 // Override with fund password requirement (replaces the existing route above)
 
+
+/* ─── GET /compliance — AML risk score list ──────────────────────────────── */
+
+admin.get("/compliance", async (c) => {
+  const db = getDb();
+  const status = c.req.query("status") ?? "all";
+  const search = c.req.query("search") ?? "";
+  const page   = parseInt(c.req.query("page") ?? "1");
+  const limit  = 50;
+  const offset = (page - 1) * limit;
+
+  let query = db
+    .from("aml_risk_scores")
+    .select("uid, score, status, signals, scored_at, manual_override, override_reason", { count: "exact" })
+    .order("score", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (status !== "all") query = (query as ReturnType<typeof query.eq>).eq("status", status);
+
+  const { data: scores, count } = await query;
+
+  // Enrich with user email/display_name
+  const uids = (scores ?? []).map((s: unknown) => (s as { uid: string }).uid);
+  const { data: users } = uids.length > 0
+    ? await db.from("users").select("uid, email, display_name").in("uid", uids)
+    : { data: [] };
+
+  const userMap = new Map((users ?? []).map((u) => [u.uid, u]));
+
+  const items = (scores ?? [])
+    .map((s: unknown) => {
+      const score = s as { uid: string; score: number; status: string; signals: unknown; scored_at: string; manual_override: number | null; override_reason: string | null };
+      const user = userMap.get(score.uid);
+      return { ...score, email: user?.email ?? score.uid, display_name: user?.display_name ?? null };
+    })
+    .filter((r) => !search || r.email.includes(search) || r.uid.includes(search));
+
+  return c.json({ success: true, data: { items, total: count ?? 0 } });
+});
+
+/* ─── GET /compliance/:uid/actions — action history ─────────────────────── */
+
+admin.get("/compliance/:uid/actions", async (c) => {
+  const db = getDb();
+  const { uid } = c.req.param();
+  const { data: items } = await db
+    .from("compliance_actions")
+    .select("id, action, reason, score_at_action, performed_by, created_at")
+    .eq("uid", uid)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  return c.json({ success: true, data: { items: items ?? [] } });
+});
+
+/* ─── POST /compliance/:uid/override — manual score override ─────────────── */
+
+admin.post("/compliance/:uid/override",
+  zValidator("json", z.object({ score: z.number().min(0).max(100), reason: z.string().min(3) })),
+  async (c) => {
+    const db = getDb();
+    const { uid } = c.req.param();
+    const { score, reason } = c.req.valid("json");
+    const adminUser = c.get("user");
+
+    await db.from("aml_risk_scores").upsert({
+      uid, score,
+      manual_override: score,
+      override_by_uid: adminUser.uid,
+      override_reason: reason,
+      scored_at: new Date().toISOString(),
+    }, { onConflict: "uid" });
+
+    await db.from("compliance_actions").insert({
+      uid,
+      action: "manual_override",
+      reason: `Score manually set to ${score}: ${reason}`,
+      score_at_action: score,
+      performed_by: adminUser.uid,
+    });
+
+    return c.json({ success: true });
+  }
+);
+
+/* ─── POST /compliance/:uid/clear — reset score to 0 ────────────────────── */
+
+admin.post("/compliance/:uid/clear", async (c) => {
+  const db = getDb();
+  const { uid } = c.req.param();
+  const adminUser = c.get("user");
+
+  await db.from("aml_risk_scores").upsert({
+    uid, score: 0, signals: [] as never, status: "normal",
+    manual_override: null, override_by_uid: null, override_reason: null,
+    scored_at: new Date().toISOString(),
+  }, { onConflict: "uid" });
+
+  await db.from("compliance_actions").insert({
+    uid, action: "score_cleared", reason: "Score manually cleared by admin",
+    score_at_action: 0, performed_by: adminUser.uid,
+  });
+
+  return c.json({ success: true });
+});
+
+/* ─── POST /compliance/:uid/suspend — manual suspend ────────────────────── */
+
+admin.post("/compliance/:uid/suspend",
+  zValidator("json", z.object({ reason: z.string().min(3) })),
+  async (c) => {
+    const db = getDb();
+    const { uid } = c.req.param();
+    const { reason } = c.req.valid("json");
+    const adminUser = c.get("user");
+
+    const suspendUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await db.from("users").update({ suspended_until: suspendUntil, suspension_reason: reason }).eq("uid", uid);
+
+    await db.from("compliance_actions" as never).insert({
+      uid, action: "manual_suspend", reason,
+      score_at_action: null, performed_by: adminUser.uid,
+    });
+
+    try {
+      const { redis } = await import("@/lib/redis/client");
+      await redis.del(`suspended:${uid}`);
+    } catch { /* non-fatal */ }
+
+    return c.json({ success: true });
+  }
+);
+
 export default admin;

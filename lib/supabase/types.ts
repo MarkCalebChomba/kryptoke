@@ -678,6 +678,115 @@ export interface Database {
           label?: string;
         };
       };
+      compliance_alerts: {
+        Row: {
+          id: string;
+          uid: string | null;
+          alert_type: string;
+          details: Record<string, unknown>;
+          severity: "low" | "medium" | "high" | "critical";
+          status: "open" | "reviewed" | "closed";
+          created_at: string;
+          reviewed_by_uid: string | null;
+          reviewed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          uid?: string | null;
+          alert_type: string;
+          details?: Record<string, unknown>;
+          severity: "low" | "medium" | "high" | "critical";
+          status?: "open" | "reviewed" | "closed";
+          created_at?: string;
+          reviewed_by_uid?: string | null;
+          reviewed_at?: string | null;
+        };
+        Update: {
+          status?: "open" | "reviewed" | "closed";
+          reviewed_by_uid?: string | null;
+          reviewed_at?: string | null;
+        };
+      };
+      aml_risk_scores: {
+        Row: {
+          uid: string;
+          score: number;
+          signals: Array<{ id: string; label: string; weight: number }>;
+          status: "normal" | "review" | "restricted" | "suspended";
+          scored_at: string | null;
+          manual_override: number | null;
+          override_by_uid: string | null;
+          override_reason: string | null;
+        };
+        Insert: {
+          uid: string;
+          score?: number;
+          signals?: Array<{ id: string; label: string; weight: number }>;
+          status?: "normal" | "review" | "restricted" | "suspended";
+          scored_at?: string | null;
+          manual_override?: number | null;
+          override_by_uid?: string | null;
+          override_reason?: string | null;
+        };
+        Update: {
+          score?: number;
+          signals?: Array<{ id: string; label: string; weight: number }>;
+          status?: "normal" | "review" | "restricted" | "suspended";
+          scored_at?: string | null;
+          manual_override?: number | null;
+          override_by_uid?: string | null;
+          override_reason?: string | null;
+        };
+      };
+      compliance_actions: {
+        Row: {
+          id: string;
+          uid: string;
+          action: string;
+          reason: string;
+          score_at_action: number | null;
+          signals: unknown;
+          performed_by: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          action: string;
+          reason: string;
+          score_at_action?: number | null;
+          signals?: unknown;
+          performed_by?: string;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+      };
+      blocked_addresses: {
+        Row: {
+          id: string;
+          address: string;
+          chain: string;
+          risk_level: "sanctions" | "high_risk" | "darknet" | "mixer";
+          source: string;
+          notes: string | null;
+          added_at: string;
+          added_by_uid: string | null;
+        };
+        Insert: {
+          id?: string;
+          address: string;
+          chain: string;
+          risk_level: "sanctions" | "high_risk" | "darknet" | "mixer";
+          source: string;
+          notes?: string | null;
+          added_at?: string;
+          added_by_uid?: string | null;
+        };
+        Update: {
+          notes?: string | null;
+          risk_level?: "sanctions" | "high_risk" | "darknet" | "mixer";
+        };
+      };
       referrals: {
         Row: {
           id: string;
