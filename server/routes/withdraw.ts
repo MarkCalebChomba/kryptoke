@@ -118,15 +118,27 @@ withdraw.post("/kes", withSensitiveRateLimit(),
     amount: z.number().min(100).max(150_000),
     phone: z.string().refine(isValidKenyanPhone, "Invalid phone number"),
     assetPin: z.string().length(6).regex(/^\d+$/),
+    provider_id: z.string().min(1).max(30).default("mpesa"),
   })),
   async (c) => {
     const { uid } = c.get("user");
-    const { amount, phone, assetPin } = c.req.valid("json");
+    const { amount, phone, assetPin, provider_id } = c.req.valid("json");
     const amountStr = amount.toFixed(2);
     const db = getDb();
 
+    // Validate provider
+    const { validateProvider } = await import("@/server/services/paymentProviders");
     const userRow = await findUserByUid(uid);
     if (!userRow?.asset_pin_hash) return c.json({ success: false, error: "Asset PIN not set", statusCode: 400 }, 400);
+
+    const countryCode = (userRow as Record<string, unknown>)?.country_code as string ?? "KE";
+    const providerCheck = validateProvider(provider_id, countryCode);
+    if ("error" in providerCheck) {
+      return c.json({ success: false, error: providerCheck.error, statusCode: 400 }, 400);
+    }
+    if (provider_id !== "mpesa") {
+      return c.json({ success: false, error: `${providerCheck.provider.name} withdrawals are coming soon.`, statusCode: 400 }, 400);
+    }
     const pinValid = await bcrypt.compare(assetPin, userRow.asset_pin_hash);
     if (!pinValid) return c.json({ success: false, error: "Incorrect asset PIN", statusCode: 400 }, 400);
 
@@ -153,7 +165,7 @@ withdraw.post("/kes", withSensitiveRateLimit(),
     await upsertBalance(uid, "KES", subtract(kesBalance, amountStr), "funding");
 
     const { data: wr, error: ie } = await db.from("withdrawals")
-      .insert({ uid, type: "kes", amount: amountStr, fee, net_amount: netAmount, phone, status: "processing" })
+      .insert({ uid, type: "kes", amount: amountStr, fee, net_amount: netAmount, phone, status: "processing", provider_id })
       .select().single();
 
     if (ie || !wr) { await upsertBalance(uid, "KES", kesBalance, "funding"); return c.json({ success: false, error: "Failed to create record", statusCode: 500 }, 500); }

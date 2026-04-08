@@ -39,11 +39,30 @@ mpesa.post(
     z.object({
       phone: z.string().refine(isValidKenyanPhone, "Invalid Kenyan phone number"),
       amount: z.number().min(10, "Minimum deposit is KSh 10").max(300_000),
+      provider_id: z.string().min(1).max(30).default("mpesa"),
     })
   ),
   async (c) => {
     const { uid } = c.get("user");
-    const { phone, amount } = c.req.valid("json");
+    const { phone, amount, provider_id } = c.req.valid("json");
+
+    // Validate provider is active and available
+    const { validateProvider } = await import("@/server/services/paymentProviders");
+    const userRow = await findUserByUid(uid);
+    const countryCode = (userRow as Record<string, unknown>)?.country_code as string ?? "KE";
+    const providerCheck = validateProvider(provider_id, countryCode);
+    if ("error" in providerCheck) {
+      return c.json({ success: false, error: providerCheck.error, statusCode: 400 }, 400);
+    }
+
+    // Currently only M-Pesa STK push is implemented — route accordingly
+    if (provider_id !== "mpesa") {
+      return c.json({
+        success: false,
+        error: `${providerCheck.provider.name} deposits are coming soon. Use M-Pesa for now.`,
+        statusCode: 400,
+      }, 400);
+    }
 
     // Fetch user and rate in parallel
     const [userRow, kesPerUsd] = await Promise.all([
@@ -66,6 +85,7 @@ mpesa.post(
         amount_kes: amount.toFixed(2),
         kes_per_usd: kesPerUsd,
         status: "pending",
+        provider_id,
       })
       .select()
       .single();

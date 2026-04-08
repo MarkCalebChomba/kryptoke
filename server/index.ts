@@ -22,6 +22,7 @@ import analyticsRoutes from "./routes/analytics";
 import futuresRoutes from "./routes/futures";
 import adminRoutes from "./routes/admin/index";
 import supportRoutes from "./routes/support";
+import configRoutes from "./routes/config";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -77,6 +78,7 @@ app.use("*", async (c, next) => {
     "/api/v1/withdraw/b2c/timeout",
     "/api/v1/auth/login",
     "/api/v1/auth/register",
+    "/api/v1/config/",        // public config endpoints never gated
   ];
   if (alwaysAllow.some((p) => path.startsWith(p))) {
     await next();
@@ -124,6 +126,7 @@ app.route("/notifications", notificationRoutes);
 app.route("/earn", earnRoutes);
 app.route("/analytics", analyticsRoutes);
 app.route("/support", supportRoutes);
+app.route("/config", configRoutes);
 app.route("/admin", adminRoutes);
 app.route("/", feedbackRoutes);
 

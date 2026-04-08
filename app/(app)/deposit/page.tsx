@@ -7,6 +7,8 @@ import { useDepositAddress } from "@/lib/hooks/useDepositAddress";
 import { useAuth } from "@/lib/store";
 import { useToastActions } from "@/components/shared/ToastContainer";
 import { sanitizeNumberInput, isValidKenyanPhone } from "@/lib/utils/formatters";
+import { useQuery } from "@tanstack/react-query";
+import { apiGet } from "@/lib/api/client";
 import { IconMpesa, IconCopy, IconCheck, IconChevronRight } from "@/components/icons";
 import { cn } from "@/lib/utils/cn";
 
@@ -24,6 +26,21 @@ function useQrDataUrl(value: string | undefined) {
     return () => { cancelled = true; };
   }, [value]);
   return dataUrl;
+}
+
+interface PaymentMethod {
+  id: string;
+  name: string;
+  type: string;
+  processingTime: string;
+  logoUrl: string | null;
+}
+
+interface PaymentMethodsResponse {
+  country: string;
+  providers: PaymentMethod[];
+  hasActiveProviders: boolean;
+  fallbackMessage: string | null;
 }
 
 // ─── Token + chain data (mirrors DepositSheet) ────────────────────────────
@@ -62,6 +79,14 @@ type CryptoStep = "token" | "chain" | "address";
 export default function DepositPage() {
   const toast = useToastActions();
   const { user } = useAuth();
+  const countryCode = (user as Record<string, unknown>)?.country_code as string ?? "KE";
+
+  // Fetch available payment methods for this user's country
+  const { data: paymentMethodsData } = useQuery({
+    queryKey: ["config", "payment-methods", countryCode],
+    queryFn: () => apiGet<PaymentMethodsResponse>(`/config/payment-methods?country=${countryCode}`),
+    staleTime: 5 * 60_000,
+  });
 
   const [tab, setTab] = useState<DepositTab>("mpesa");
   const [copied, setCopied] = useState(false);
@@ -119,6 +144,16 @@ export default function DepositPage() {
       {/* ── M-Pesa tab ─────────────────────────────────────────────────── */}
       {tab === "mpesa" && (
         <div className="px-4 pt-4 space-y-4">
+
+          {/* Coming-soon banner for countries with no active fiat provider */}
+          {paymentMethodsData && !paymentMethodsData.hasActiveProviders && (
+            <div className="card bg-primary/5 border-primary/20">
+              <p className="font-outfit text-xs text-primary font-semibold mb-1">Fiat payments coming soon</p>
+              <p className="font-outfit text-xs text-text-secondary leading-relaxed">
+                {paymentMethodsData.fallbackMessage ?? "Mobile money and card payments are not yet available in your region. Use the Crypto tab to deposit."}
+              </p>
+            </div>
+          )}
           {/* Quick amounts */}
           <div>
             <p className="font-outfit text-xs text-text-muted mb-2 uppercase tracking-wide">Quick Amounts</p>
