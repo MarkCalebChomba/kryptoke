@@ -8,6 +8,7 @@ import { EventsCalendar } from "@/components/home/EventsCalendar";
 import { NotificationsSheet } from "@/components/home/NotificationsSheet";
 import { MenuSheet } from "@/components/home/MenuSheet";
 import { DepositSheet } from "@/components/home/DepositSheet";
+import { P2PSheet } from "@/components/home/P2PSheet";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { useHomeData } from "@/lib/hooks/useMarketData";
 import { useNotifications } from "@/lib/hooks/useNotifications";
@@ -166,6 +167,7 @@ export default function HomePage() {
   const [notifOpen,   setNotifOpen]   = useState(false);
   const [menuOpen,    setMenuOpen]    = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
+  const [sendOpen,    setSendOpen]    = useState(false);
 
   useNotifications();
 
@@ -258,14 +260,12 @@ export default function HomePage() {
         <QuickAction
           icon={
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M8 7h12M8 12h8M8 17h5" stroke="#00B4FF" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="3.5" cy="7" r="1.5" fill="#00B4FF"/>
-              <circle cx="3.5" cy="12" r="1.5" fill="#00B4FF"/>
-              <circle cx="3.5" cy="17" r="1.5" fill="#00B4FF"/>
+              <path d="M22 2L11 13" stroke="#F0B429" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M22 2L15 22l-4-9-9-4 20-7z" stroke="#F0B429" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           }
-          label="Convert" color="text-primary" bg="bg-primary/10"
-          onClick={() => router.push("/trade")}
+          label="Send" color="text-gold" bg="bg-gold/10"
+          onClick={() => setSendOpen(true)}
         />
         <QuickAction
           icon={
@@ -363,6 +363,7 @@ export default function HomePage() {
       <NotificationsSheet isOpen={notifOpen} onClose={() => setNotifOpen(false)} />
       <MenuSheet isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
       <DepositSheet isOpen={depositOpen} onClose={() => setDepositOpen(false)} />
+      <P2PSheet isOpen={sendOpen} onClose={() => setSendOpen(false)} />
     </div>
   );
 }
