@@ -358,7 +358,7 @@ wallet.get("/deposit/address/:chain", authMiddleware, withApiRateLimit(), async 
   const chainId = c.req.param("chain").toUpperCase();
   const db = getDb();
 
-  // ── EVM chains — use existing deposit_address from users table ───────────
+  // ── EVM chains — derive deposit address from hd_index ────────────────────
   if (/^\d+$/.test(chainId)) {
     const userRow = await findUserByUid(uid);
     if (!userRow) return c.json({ success: false, error: "User not found", statusCode: 404 }, 404);
@@ -375,11 +375,26 @@ wallet.get("/deposit/address/:chain", authMiddleware, withApiRateLimit(), async 
       return c.json({ success: false, error: "Deposits on this network are temporarily suspended.", statusCode: 400 }, 400);
     }
 
+    // Use stored deposit_address if available; otherwise derive from hd_index.
+    // All EVM chains share the same HD-derived 0x address.
+    let depositAddress = userRow.deposit_address as string | null;
+
+    if (!depositAddress && userRow.hd_index != null) {
+      const { deriveDepositAddress } = await import("@/server/services/blockchain");
+      depositAddress = deriveDepositAddress(userRow.hd_index);
+      // Persist for next time
+      await db.from("users").update({ deposit_address: depositAddress }).eq("uid", uid);
+    }
+
+    if (!depositAddress) {
+      return c.json({ success: false, error: "Deposit address not yet assigned. Please contact support.", statusCode: 503 }, 503);
+    }
+
     return c.json({
       success: true,
       data: {
         chainId,
-        address: userRow.deposit_address,
+        address: depositAddress,
         memo: null,
         isMemoChain: false,
       },
@@ -430,7 +445,18 @@ wallet.get("/deposit/address/:chain", authMiddleware, withApiRateLimit(), async 
     if (!hotAddr) {
       return c.json({ success: false, error: `${chainId} deposit address not configured. Contact support.`, statusCode: 503 }, 503);
     }
-    const memo = getMemoForUser(chainId as NonEvmChainId, uid);
+
+    // XRP uses a numeric DestinationTag (uint32), not a hex string.
+    // The scanner matches on parseInt(uid_hex_8, 16) >>> 0.
+    // Returning the numeric string here so the UI shows the right value to users.
+    let memo: string | null;
+    if (chainId === "XRP") {
+      const { xrpDestinationTagForUser } = await import("@/server/services/nonEvm");
+      memo = String(xrpDestinationTagForUser(uid));
+    } else {
+      memo = getMemoForUser(chainId as NonEvmChainId, uid);
+    }
+
     return c.json({ success: true, data: { chainId, address: hotAddr, memo, isMemoChain: true } });
   }
 

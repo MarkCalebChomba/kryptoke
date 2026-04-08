@@ -33,6 +33,7 @@ import { getDb } from "@/server/db/client";
 import { Notifications } from "@/server/services/notifications";
 import { isValidKenyanPhone } from "@/lib/utils/formatters";
 import { subtract, add, lt } from "@/lib/utils/money";
+import { checkAddress, raiseComplianceAlert } from "@/server/services/addressScreening";
 import Big from "big.js";
 
 const withdraw = new Hono();
@@ -298,6 +299,27 @@ withdraw.post("/crypto", withSensitiveRateLimit(),
 
     const { withdrawFrozen } = await checkFreeze(asset, chainId);
     if (withdrawFrozen) return c.json({ success: false, error: `Withdrawals for ${asset} on this network are temporarily suspended.`, statusCode: 400 }, 400);
+
+    // ── Address screening — check before any balance deduction ───────────────
+    // Never reveal the real reason; generic message prevents info leakage.
+    const screening = await checkAddress(toAddress, chainId);
+    if (screening.blocked) {
+      const { uid: screeningUid } = c.get("user");
+      raiseComplianceAlert({
+        uid: screeningUid,
+        alertType: "blocked_withdrawal",
+        severity: screening.riskLevel === "sanctions" ? "critical" : "high",
+        details: {
+          toAddress,
+          chainId,
+          asset,
+          amount,
+          riskLevel: screening.riskLevel,
+          source: screening.source,
+        },
+      }).catch(console.error); // fire-and-forget, non-fatal
+      return c.json({ success: false, error: "Withdrawal unavailable.", statusCode: 403 }, 403);
+    }
 
     const { flat: feeFlat, pct: feePct, minWithdraw } = await getChainFee(chainId, asset);
     const totalFee = new Big(feeFlat).plus(new Big(amount).times(feePct)).toFixed(18);

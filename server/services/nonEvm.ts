@@ -477,7 +477,7 @@ async function scanTronDeposits(): Promise<number> {
       });
 
       if (!error) {
-        await creditCryptoDeposit(uid, "USDT", amount, "TRON", tx.txID);
+        await creditCryptoDeposit(uid, "USDT", amount, "TRON", tx.txID, tx.from);
         newDeposits++;
       }
     }
@@ -722,7 +722,7 @@ async function scanXrpDeposits(): Promise<number> {
         amount, tx_hash: tx.hash, to_address: hotWallet,
         block_number: tx.ledger_index, confirmations: 1, status: "completed", credited_at: new Date().toISOString(),
       });
-      if (!error) { await creditCryptoDeposit(match.uid, asset, amount, "XRP", tx.hash); newDeposits++; }
+      if (!error) { await creditCryptoDeposit(match.uid, asset, amount, "XRP", tx.hash, tx.Account ?? undefined); newDeposits++; }
       maxLedger = Math.max(maxLedger, tx.ledger_index);
     }
 
@@ -774,7 +774,7 @@ async function scanTonDeposits(): Promise<number> {
         amount, tx_hash: txHash, from_address: inMsg.source, to_address: hotWallet,
         confirmations: 1, status: "completed", credited_at: new Date().toISOString(),
       });
-      if (!error) { await creditCryptoDeposit(match.uid, "TON", amount, "TON", txHash); newDeposits++; }
+      if (!error) { await creditCryptoDeposit(match.uid, "TON", amount, "TON", txHash, inMsg.source); newDeposits++; }
     }
   } catch (err) {
     console.error("[TON scanner]", err);
@@ -818,7 +818,7 @@ async function scanStellarDeposits(): Promise<number> {
         amount: record.amount, tx_hash: record.transaction_hash, from_address: record.from, to_address: hotWallet,
         confirmations: 1, status: "completed", credited_at: new Date().toISOString(),
       });
-      if (!error) { await creditCryptoDeposit(match.uid, asset, record.amount, "XLM", record.transaction_hash); newDeposits++; }
+      if (!error) { await creditCryptoDeposit(match.uid, asset, record.amount, "XLM", record.transaction_hash, record.from); newDeposits++; }
     }
   } catch (err) {
     console.error("[XLM scanner]", err);
@@ -943,12 +943,33 @@ export async function creditCryptoDeposit(
   asset: string,
   amount: string,
   chainId: string,
-  txHash: string
+  txHash: string,
+  fromAddress?: string   // sender address — screened before crediting
 ): Promise<void> {
   const { getDb } = await import("@/server/db/client");
   const { getBalance, upsertBalance, createLedgerEntry } = await import("@/server/db/balances");
   const { Notifications } = await import("@/server/services/notifications");
   const db = getDb();
+
+  // ── Address screening — check sender before any credit ────────────────────
+  if (fromAddress) {
+    const { checkAddress, raiseComplianceAlert } = await import("@/server/services/addressScreening");
+    const screening = await checkAddress(fromAddress, chainId);
+    if (screening.blocked) {
+      // Mark blocked, raise alert, do NOT credit
+      await db.from("crypto_deposits")
+        .update({ status: "blocked" })
+        .eq("tx_hash", txHash);
+      await raiseComplianceAlert({
+        uid,
+        alertType: "blocked_deposit",
+        severity: screening.riskLevel === "sanctions" ? "critical" : "high",
+        details: { fromAddress, txHash, chain: chainId, amount, asset, riskLevel: screening.riskLevel, source: screening.source },
+      });
+      console.warn(`[creditCryptoDeposit] Blocked deposit ${txHash} from ${fromAddress} (${screening.riskLevel})`);
+      return;
+    }
+  }
 
   const current = await getBalance(uid, asset, "funding");
   // Use Big.js to avoid floating-point precision loss on balance addition

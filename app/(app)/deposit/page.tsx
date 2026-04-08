@@ -1,17 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
 import { TopBar } from "@/components/shared/TopBar";
 import { useMpesaDeposit } from "@/lib/hooks/useDeposit";
 import { useDepositAddress } from "@/lib/hooks/useDepositAddress";
 import { useAuth } from "@/lib/store";
 import { useToastActions } from "@/components/shared/ToastContainer";
 import { sanitizeNumberInput, isValidKenyanPhone } from "@/lib/utils/formatters";
-import { apiGet } from "@/lib/api/client";
 import { IconMpesa, IconCopy, IconCheck, IconChevronRight } from "@/components/icons";
 import { cn } from "@/lib/utils/cn";
+
+// Lazily generate QR data URL from address string
+function useQrDataUrl(value: string | undefined) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!value) { setDataUrl(null); return; }
+    let cancelled = false;
+    import("qrcode").then((QRCode) => {
+      QRCode.toDataURL(value, { width: 160, margin: 1, color: { dark: "#080C14", light: "#FFFFFF" } })
+        .then((url) => { if (!cancelled) setDataUrl(url); })
+        .catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [value]);
+  return dataUrl;
+}
 
 // ─── Token + chain data (mirrors DepositSheet) ────────────────────────────
 const DEPOSIT_TOKENS = [
@@ -47,7 +60,6 @@ type DepositTab = "mpesa" | "crypto";
 type CryptoStep = "token" | "chain" | "address";
 
 export default function DepositPage() {
-  const router = useRouter();
   const toast = useToastActions();
   const { user } = useAuth();
 
@@ -66,6 +78,7 @@ export default function DepositPage() {
   const { address, memo, isLoading: addrLoading } = useDepositAddress(
     cryptoStep === "address" ? selectedChain.chainId : null
   );
+  const qrDataUrl = useQrDataUrl(address ?? undefined);
 
   async function handleMpesaDeposit() {
     const amt = parseFloat(amount);
@@ -254,18 +267,17 @@ export default function DepositPage() {
                 <div className="skeleton h-40 rounded-2xl" />
               ) : (
                 <div className="card space-y-4">
-                  {/* QR Code area */}
+                  {/* QR Code */}
                   <div className="flex flex-col items-center py-4">
-                    <div className="w-36 h-36 rounded-2xl bg-bg-surface2 border border-border flex items-center justify-center mb-3">
-                      <div className="grid grid-cols-7 gap-0.5 opacity-70">
-                        {Array.from({ length: 49 }).map((_, i) => (
-                          <div key={i} className={cn("w-3.5 h-3.5 rounded-[2px]",
-                            (Math.sin(i * 7 + 3) * 0.5 + 0.5) > 0.45 ? "bg-text-primary" : "bg-transparent"
-                          )} />
-                        ))}
-                      </div>
+                    <div className="w-40 h-40 rounded-2xl bg-white p-2 flex items-center justify-center">
+                      {qrDataUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={qrDataUrl} alt="Deposit address QR code" width={144} height={144} className="rounded-xl" />
+                      ) : (
+                        <div className="w-36 h-36 bg-bg-surface2 rounded-xl animate-pulse" />
+                      )}
                     </div>
-                    <p className="font-outfit text-[10px] text-text-muted">Scan with your wallet app</p>
+                    <p className="font-outfit text-[10px] text-text-muted mt-2">Scan with your wallet app</p>
                   </div>
 
                   {/* Address */}
@@ -283,11 +295,12 @@ export default function DepositPage() {
                     </div>
                   </div>
 
-                  {/* Memo if needed */}
+                  {/* Memo / Destination Tag if needed */}
                   {memo && (
                     <div>
                       <p className="font-outfit text-xs text-text-muted mb-1.5">
-                        Memo / Tag <span className="text-down font-semibold">(Required)</span>
+                        {selectedChain.chainId === "XRP" ? "Destination Tag" : "Memo / Tag"}{" "}
+                        <span className="text-down font-semibold">(Required)</span>
                       </p>
                       <div className="flex items-center gap-2 bg-down/5 border border-down/30 rounded-xl px-3 py-2.5">
                         <p className="flex-1 font-price text-sm text-text-primary">{memo}</p>
@@ -296,7 +309,9 @@ export default function DepositPage() {
                         </button>
                       </div>
                       <p className="font-outfit text-[10px] text-down mt-1">
-                        You must include this memo or your deposit will not be credited.
+                        {selectedChain.chainId === "XRP"
+                          ? "You must include this Destination Tag. Deposits without it cannot be credited."
+                          : "You must include this memo or your deposit will not be credited."}
                       </p>
                     </div>
                   )}
