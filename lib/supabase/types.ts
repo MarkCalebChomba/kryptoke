@@ -29,6 +29,9 @@ export interface Database {
           auto_earn: boolean;
           created_at: string;
           last_active_at: string;
+          suspended_until: string | null;
+          suspension_reason: string | null;
+          referral_code: string | null;
         };
         Insert: {
           uid?: string;
@@ -49,6 +52,9 @@ export interface Database {
           auto_earn?: boolean;
           created_at?: string;
           last_active_at?: string;
+          suspended_until?: string | null;
+          suspension_reason?: string | null;
+          referral_code?: string | null;
         };
         Update: {
           uid?: string;
@@ -661,6 +667,114 @@ export interface Database {
         };
         Update: {
           label?: string;
+        };
+      };
+      non_evm_chains: {
+        Row: {
+          id: string;
+          name: string;
+          coin_type: number;
+          symbol: string;
+          decimals: number;
+          explorer_url: string;
+          explorer_tx: string;
+          rpc_url: string | null;
+          deposit_enabled: boolean;
+          withdraw_enabled: boolean;
+          min_deposit: string;
+          min_withdraw: string;
+          confirmations: number;
+          arrival_time: string;
+          sort_order: number;
+        };
+        Insert: {
+          id: string;
+          name: string;
+          coin_type: number;
+          symbol: string;
+          decimals?: number;
+          explorer_url: string;
+          explorer_tx?: string;
+          rpc_url?: string | null;
+          deposit_enabled?: boolean;
+          withdraw_enabled?: boolean;
+          min_deposit?: string;
+          min_withdraw?: string;
+          confirmations?: number;
+          arrival_time?: string;
+          sort_order?: number;
+        };
+        Update: {
+          name?: string;
+          coin_type?: number;
+          symbol?: string;
+          decimals?: number;
+          explorer_url?: string;
+          explorer_tx?: string;
+          rpc_url?: string | null;
+          deposit_enabled?: boolean;
+          withdraw_enabled?: boolean;
+          min_deposit?: string;
+          min_withdraw?: string;
+          confirmations?: number;
+          arrival_time?: string;
+          sort_order?: number;
+        };
+      };
+      token_chain_freeze: {
+        Row: {
+          id: string;
+          token_symbol: string;
+          chain_id: string;
+          deposit_frozen: boolean;
+          withdraw_frozen: boolean;
+          freeze_reason: string | null;
+          frozen_by: string | null;
+          frozen_at: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          token_symbol: string;
+          chain_id: string;
+          deposit_frozen?: boolean;
+          withdraw_frozen?: boolean;
+          freeze_reason?: string | null;
+          frozen_by?: string | null;
+          frozen_at?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          token_symbol?: string;
+          chain_id?: string;
+          deposit_frozen?: boolean;
+          withdraw_frozen?: boolean;
+          freeze_reason?: string | null;
+          frozen_by?: string | null;
+          frozen_at?: string | null;
+          updated_at?: string;
+        };
+      };
+      user_chain_addresses: {
+        Row: {
+          id: string;
+          uid: string;
+          chain: string;
+          address: string;
+          memo: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          chain: string;
+          address: string;
+          memo?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          address?: string;
+          memo?: string | null;
         };
       };
     };
