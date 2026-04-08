@@ -48,7 +48,7 @@ export default function LoginPage() {
       setStoredToken(data.accessToken);
       setUser(data.user, data.accessToken);
       toast.success("Welcome back");
-      router.replace("/");
+      router.replace("/trade");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       // Show clean messages — never expose backend error strings to users
@@ -103,7 +103,7 @@ export default function LoginPage() {
               autoCapitalize="none"
               spellCheck={false}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => { setEmail(e.target.value); setErrors((p) => ({ ...p, general: undefined })); }}
               onBlur={() => {
                 if (email && !/\S+@\S+\.\S+/.test(email)) {
                   setErrors((p) => ({ ...p, email: "Enter a valid email" }));
@@ -146,7 +146,7 @@ export default function LoginPage() {
                 type={showPassword ? "text" : "password"}
                 autoComplete="current-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); setErrors((p) => ({ ...p, general: undefined })); }}
                 className={cn(
                   "input-field pr-12",
                   errors.password && "border-down focus:border-down"

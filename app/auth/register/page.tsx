@@ -50,6 +50,7 @@ function DetailsStep({ onSuccess }: { onSuccess: (email: string, phone: string) 
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [referralCode, setReferralCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -79,7 +80,7 @@ function DetailsStep({ onSuccess }: { onSuccess: (email: string, phone: string) 
 
     setIsLoading(true);
     try {
-      await apiPost<RegisterResponse>("/auth/register", { email, phone, password });
+      await apiPost<RegisterResponse>("/auth/register", { email, phone, password, ...(referralCode.trim() ? { referralCode: referralCode.trim() } : {}) });
       toast.success("Account created", "Check your email for a verification code");
       onSuccess(email, phone);
     } catch (err) {
@@ -142,6 +143,13 @@ function DetailsStep({ onSuccess }: { onSuccess: (email: string, phone: string) 
             <p className={cn("text-xs font-outfit", strengthText)}>{strengthLabel}</p>
           </div>
         )}
+      </div>
+
+      <div>
+        <label htmlFor="referral" className="block font-outfit text-sm text-text-secondary mb-1.5">Referral code <span className="text-text-muted">(optional)</span></label>
+        <input id="referral" type="text" autoCapitalize="characters" spellCheck={false}
+          value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+          className="input-field" placeholder="e.g. KK-ABC123" disabled={isLoading} />
       </div>
 
       <p className="text-text-muted font-outfit text-xs leading-relaxed">

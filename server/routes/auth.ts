@@ -37,6 +37,7 @@ const registerSchema = z.object({
     .min(8, "Password must be at least 8 characters")
     .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
     .regex(/[0-9]/, "Password must contain at least one number"),
+  referralCode: z.string().min(1).max(30).optional(),
 });
 
 const loginSchema = z.object({
@@ -124,7 +125,7 @@ auth.post(
   withAuthRateLimit(),
   zValidator("json", registerSchema),
   async (c) => {
-    const { email, phone, password } = c.req.valid("json");
+    const { email, phone, password, referralCode } = c.req.valid("json");
     const normalizedPhone = normalizeKenyanPhone(phone);
 
     // Check email not already taken
@@ -160,6 +161,29 @@ auth.post(
 
     // Initialize zero balances
     await initializeUserBalances(user.uid);
+
+    // Record referral if a valid code was supplied (fire-and-forget — never block registration)
+    if (referralCode) {
+      (async () => {
+        try {
+          const db2 = getDb();
+          const { data: referrer } = await db2
+            .from("users")
+            .select("uid")
+            .eq("referral_code", referralCode.trim().toUpperCase())
+            .maybeSingle();
+          if (referrer) {
+            await db2.from("referrals").insert({
+              referrer_uid: referrer.uid,
+              referee_uid: user.uid,
+              total_earned_usdt: 0,
+            });
+          }
+        } catch (refErr) {
+          console.error("[register] Referral record failed:", refErr);
+        }
+      })();
+    }
 
     // Send email verification OTP — non-fatal: account is created even if email fails
     let emailSent = true;
@@ -218,9 +242,21 @@ auth.post(
     // Record login session (fire-and-forget — never block login on this)
     (async () => {
       try {
-        const ip = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
-        const ua = c.req.header("user-agent") ?? null;
+        const ip = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+        const ua = c.req.header("user-agent") ?? "unknown";
         const db2 = getDb();
+
+        // Check if this IP+UA combination has been seen before for this user
+        const { data: knownSession } = await db2
+          .from("login_sessions")
+          .select("id")
+          .eq("uid", userRow.uid)
+          .eq("ip_address", ip)
+          .limit(1)
+          .maybeSingle();
+
+        const isNewDevice = !knownSession;
+
         // Mark all previous sessions as not-current
         await db2.from("login_sessions").update({ is_current: false }).eq("uid", userRow.uid);
         await db2.from("login_sessions").insert({ uid: userRow.uid, ip_address: ip, user_agent: ua, is_current: true });
@@ -229,6 +265,12 @@ auth.post(
         if (sessions && sessions.length > 20) {
           const toDelete = sessions.slice(20).map(s => s.id);
           await db2.from("login_sessions").delete().in("id", toDelete);
+        }
+
+        // Send new-device email alert
+        if (isNewDevice) {
+          const { Notifications } = await import("@/server/services/notifications");
+          await Notifications.newDeviceLogin(userRow.uid, ip, ua);
         }
       } catch { /* non-fatal */ }
     })();
