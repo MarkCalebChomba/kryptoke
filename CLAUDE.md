@@ -334,6 +334,8 @@ Update this section when you complete or start a task. Format:
 [SHIELD] [2026-04-08] Task 8 DONE — Migration 012_rls_custom_jwt.sql: replaced all auth.uid() RLS policies with get_app_uid() that reads request.jwt.claims->>'uid'. Added .setSubject(uid) to JWT. PREREQ: Supabase JWT secret must match JWT_SECRET in Vercel env.
 [SHIELD] [2026-04-08] Task 9 DONE — transfer-to-user: added Redis advisory lock (prevents double-spend race), recipient wallet cache bust, in-app notification INSERT for recipient. Fixed P2PSheet canSend bug (was always checking usdtBalance even for KES transfers).
 [SHIELD] [2026-04-08] Task 13 DONE — useRealtimeBalances hook: subscribes to balances+notifications tables via Supabase Realtime, updates Zustand store live. useSupabaseSession injects custom JWT into Supabase browser client. Both wired into AppLayout via AuthenticatedShell.
+[SHIELD] [2026-04-08] Known Issue #5 DONE — Extracted P2PSheet into components/home/P2PSheet.tsx. Added Send quick action to home page (replaced duplicate Convert shortcut). Users can send USDT/KES directly from home screen.
+[SHIELD] [2026-04-08] Known Issue #1 DONE — JWT revocation implemented. verifyJwt() checks Redis blocklist on every auth. revokeJwt() export for incident response. POST /logout now kills token immediately. To revoke the exposed HAR token: call revokeJwt(token) from any server context.
 
 # PULSE STATUS
 [PULSE] 2026-04-08 Task 10 DONE — Login/Signup UX fixes applied.
