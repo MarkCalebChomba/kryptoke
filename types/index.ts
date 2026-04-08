@@ -49,6 +49,7 @@ export interface ChangePasswordPayload {
 export interface Balance {
   asset: string;
   amount: string; // Always stored as string — use big.js to parse
+  account: "funding" | "trading" | "earn";
   updatedAt: string;
 }
 

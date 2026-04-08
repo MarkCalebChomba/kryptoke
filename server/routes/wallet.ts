@@ -98,6 +98,7 @@ wallet.get("/balances", async (c) => {
   const balances: Balance[] = rows.map((r) => ({
     asset: r.asset,
     amount: r.amount,
+    account: r.account as "funding" | "trading" | "earn",
     updatedAt: r.updated_at,
   }));
 
