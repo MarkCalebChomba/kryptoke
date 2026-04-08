@@ -21,12 +21,13 @@ export const handler = async (): Promise<void> => {
     Date.now() - STUCK_THRESHOLD_MINUTES * 60 * 1000
   ).toISOString();
 
-  // Find withdrawals that have been processing for over 30 minutes
+  // Find withdrawals stuck in 'processing' or 'timed_out' for over 30 minutes
+  // Covers both KES (direct M-Pesa) and mpesa_usdt (crypto→KES) withdrawal types
   const { data: stuckWithdrawals } = await db
     .from("withdrawals")
     .select("*")
-    .eq("type", "kes")
-    .eq("status", "processing")
+    .in("type", ["kes", "mpesa_usdt"])
+    .in("status", ["processing", "timed_out"])
     .lt("created_at", cutoffTime);
 
   if (!stuckWithdrawals || stuckWithdrawals.length === 0) {

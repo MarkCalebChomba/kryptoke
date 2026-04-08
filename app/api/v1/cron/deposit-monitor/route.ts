@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
 
   const { scanChainDeposits } = await import("@/server/services/nonEvm");
 
+  // ── Non-EVM chain scanners ────────────────────────────────────────────────
   // Run all chain scanners in parallel with individual error isolation
   await Promise.allSettled(
     NON_EVM_CHAINS.map(async (chain) => {
@@ -47,6 +48,18 @@ export async function POST(req: NextRequest) {
       }
     })
   );
+
+  // ── EVM chain deposit scanner ─────────────────────────────────────────────
+  // Scans user deposit wallets on all active EVM chains via Etherscan V2.
+  let evmDepositsFound = 0;
+  try {
+    evmDepositsFound = await scanEvmDeposits();
+    results["EVM"] = { depositsFound: evmDepositsFound };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    results["EVM"] = { depositsFound: 0, error: msg };
+    console.error("[deposit-monitor] EVM scanner failed:", msg);
+  }
 
   // Process withdrawal queue
   let withdrawalsProcessed = 0;
@@ -175,14 +188,14 @@ async function processWithdrawalQueue(): Promise<number> {
         updated_at: new Date().toISOString(),
       }).eq("id", wq.id);
 
-      // Refund gross amount + fee back to user's funding balance
+      // Refund gross amount + fee back to user's funding balance (Big.js for precision)
       const { getBalance, upsertBalance } = await import("@/server/db/balances");
+      const { default: Big } = await import("big.js");
       const current = await getBalance(wq.uid, wq.asset_symbol as string, "funding");
-      const refundTotal = (
-        parseFloat(current) +
-        parseFloat(wq.gross_amount as string) +
-        parseFloat(wq.fee_amount as string)
-      ).toFixed(18);
+      const refundTotal = new Big(current)
+        .plus(wq.gross_amount as string)
+        .plus(wq.fee_amount as string)
+        .toFixed(18);
       await upsertBalance(wq.uid, wq.asset_symbol as string, refundTotal, "funding");
 
       await createLedgerEntry({
@@ -257,4 +270,99 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return POST(req);
+}
+
+/**
+ * EVM Deposit Scanner
+ *
+ * For each user with an hd_index, derives their EVM deposit address and checks
+ * for new USDT/USDC ERC-20 transfers on all active chains via Etherscan V2.
+ * Idempotent — tx_hash is unique in crypto_deposits.
+ *
+ * Requires: ETHERSCAN_API_KEY, MASTER_SEED_PHRASE
+ */
+async function scanEvmDeposits(): Promise<number> {
+  const { getDb } = await import("@/server/db/client");
+  const { creditCryptoDeposit } = await import("@/server/services/nonEvm");
+  const {
+    deriveDepositAddress,
+    getIncomingTransfers,
+    ACTIVE_DEPOSIT_CHAIN_IDS,
+    CHAINS,
+  } = await import("@/server/services/blockchain");
+
+  const db = getDb();
+
+  // Fetch users with hd_index in batches — limit 200 per run to stay within cron budget
+  const { data: users } = await db
+    .from("users")
+    .select("uid, hd_index")
+    .not("hd_index", "is", null)
+    .limit(200);
+
+  if (!users?.length) return 0;
+
+  let newDeposits = 0;
+
+  // Scan each user's deposit address on all active EVM chains
+  // Use allSettled so one user's failure doesn't skip the rest
+  const tasks = users.flatMap((user) =>
+    Array.from(ACTIVE_DEPOSIT_CHAIN_IDS).map(async (chainId) => {
+      try {
+        const address = deriveDepositAddress(user.hd_index);
+        const transfers = await getIncomingTransfers(address, chainId);
+
+        for (const transfer of transfers) {
+          // Idempotency: skip if already recorded
+          const { data: existing } = await db
+            .from("crypto_deposits")
+            .select("id")
+            .eq("tx_hash", transfer.txHash)
+            .eq("chain_id", String(chainId))
+            .maybeSingle();
+
+          if (existing) continue;
+
+          const chain = CHAINS[chainId];
+          if (!chain) continue;
+
+          const { error } = await db.from("crypto_deposits").insert({
+            uid: user.uid,
+            chain_id: String(chainId),
+            chain_name: chain.name,
+            asset_symbol: transfer.tokenSymbol,
+            asset_address: transfer.tokenAddress,
+            amount: transfer.amount,
+            tx_hash: transfer.txHash,
+            from_address: transfer.from,
+            to_address: address,
+            block_number: transfer.blockNumber,
+            confirmations: chain.confirmationsRequired,
+            status: "completed",
+            credited_at: new Date().toISOString(),
+          });
+
+          if (!error) {
+            await creditCryptoDeposit(
+              user.uid,
+              transfer.tokenSymbol,
+              transfer.amount,
+              chain.name,
+              transfer.txHash
+            );
+            newDeposits++;
+          }
+        }
+      } catch (err) {
+        // Isolate per-user per-chain failure
+        console.error(
+          `[EVM scanner] chain ${chainId} user ${user.uid}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    })
+  );
+
+  await Promise.allSettled(tasks);
+  return newDeposits;
 }

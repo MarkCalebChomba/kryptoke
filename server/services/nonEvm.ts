@@ -191,6 +191,15 @@ export function xrpMemoForUser(uid: string): string {
   return uid.replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 
+/**
+ * XRP DestinationTag for a user — numeric uint32 derived from uid hex prefix.
+ * This is the value users MUST include when depositing XRP/IOU to the hot wallet.
+ * The deposit scanner matches on this same value.
+ */
+export function xrpDestinationTagForUser(uid: string): number {
+  return parseInt(uid.replace(/-/g, "").slice(0, 8), 16) >>> 0;
+}
+
 export function getXrpHotWalletAddress(): string {
   const addr = process.env.XRP_HOT_WALLET_ADDRESS;
   if (!addr) throw new Error("XRP_HOT_WALLET_ADDRESS not configured");
@@ -440,7 +449,8 @@ async function scanTronDeposits(): Promise<number> {
       if (!tx.to || !addressToUid.has(tx.to.toLowerCase())) continue;
 
       const uid = addressToUid.get(tx.to.toLowerCase())!;
-      const amount = (BigInt(tx.value) / BigInt(1_000_000)).toString(); // USDT has 6 decimals
+      // USDT-TRC20 has 6 decimals — preserve fractional units
+      const amount = (Number(tx.value) / 1_000_000).toFixed(6);
 
       // Skip if already recorded
       const { data: existing } = await db
@@ -686,12 +696,16 @@ async function scanXrpDeposits(): Promise<number> {
     for (const entry of txns) {
       if (!entry.validated || !entry.tx) continue;
       const tx = entry.tx;
-      if (!tx.DestinationTag) continue;
+      // DestinationTag is a uint32. We derive it from uid as:
+      //   parseInt(first_8_hex_chars_of_uid, 16) >>> 0
+      // The deposit UI must show this same numeric value to the user as their tag.
+      if (tx.DestinationTag === undefined || tx.DestinationTag === null) continue;
 
-      // Look up user by memo (DestinationTag encoded as decimal)
-      const memo = tx.DestinationTag.toString().padStart(8, "0").toUpperCase().slice(0, 8);
       const { data: users } = await db.from("users").select("uid").limit(500);
-      const match = users?.find((u) => u.uid.replace(/-/g, "").slice(0, 8).toUpperCase() === memo);
+      const match = users?.find((u) => {
+        const expectedTag = parseInt(u.uid.replace(/-/g, "").slice(0, 8), 16) >>> 0;
+        return tx.DestinationTag === expectedTag;
+      });
       if (!match) continue;
 
       const { data: existing } = await db.from("crypto_deposits").select("id").eq("tx_hash", tx.hash).maybeSingle();
@@ -937,7 +951,9 @@ export async function creditCryptoDeposit(
   const db = getDb();
 
   const current = await getBalance(uid, asset, "funding");
-  const newBalance = (parseFloat(current) + parseFloat(amount)).toFixed(18);
+  // Use Big.js to avoid floating-point precision loss on balance addition
+  const Big = (await import("big.js")).default;
+  const newBalance = new Big(current).plus(new Big(amount)).toFixed(18);
   await upsertBalance(uid, asset, newBalance, "funding");
 
   await createLedgerEntry({

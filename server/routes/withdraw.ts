@@ -457,7 +457,28 @@ withdraw.post("/b2c/result", async (c) => {
 });
 
 withdraw.post("/b2c/timeout", async (c) => {
-  console.warn("[B2C Timeout]");
+  // Safaricom timed out waiting for the mobile app response.
+  // The withdrawal is already in 'processing' — b2c-recovery.ts will refund
+  // it after 30 minutes if the result callback never arrives.
+  // We also immediately log the timeout so admin can see it.
+  const body = await c.req.json().catch(() => null) as { Body?: { Result?: { ConversationID?: string } } } | null;
+  const conversationId = body?.Body?.Result?.ConversationID ?? null;
+
+  if (conversationId) {
+    const db = getDb();
+    // Mark as timed_out so the recovery job prioritises it over generic "processing"
+    await db
+      .from("withdrawals")
+      .update({ status: "timed_out", updated_at: new Date().toISOString() })
+      .eq("b2c_conversation_id", conversationId)
+      .eq("status", "processing") // guard: only flip if still processing
+      .catch((err) => console.error("[B2C Timeout] DB update failed:", err));
+
+    console.warn("[B2C Timeout] Marked as timed_out:", conversationId);
+  } else {
+    console.warn("[B2C Timeout] No ConversationID in body:", JSON.stringify(body));
+  }
+
   return c.json({ ResultCode: 0, ResultDesc: "Accepted" });
 });
 
@@ -466,7 +487,7 @@ async function processB2cResult(body: unknown): Promise<void> {
   if (!data) return;
   const db = getDb();
   const { data: wr } = await db.from("withdrawals").select("*").eq("b2c_conversation_id", data.conversationId).maybeSingle();
-  if (!wr || wr.status !== "processing") return;
+  if (!wr || !["processing", "timed_out"].includes(wr.status as string)) return;
   if (data.resultCode !== 0) {
     await db.from("withdrawals").update({ status: "failed" }).eq("id", wr.id);
     // Refund the correct asset — wr.asset is the crypto asset, wr.amount is KES
