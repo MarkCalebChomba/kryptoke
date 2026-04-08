@@ -119,9 +119,9 @@ PULSE owns:
 | 2 | Crypto deposit — audit & test all chains | NEXUS | PENDING | `server/services/blockchain.ts`, `bsc.ts`, `nonEvm.ts` — check sweep cron |
 | 3 | M-Pesa withdrawal — audit & test B2C | NEXUS | PENDING | Route exists, untested. Need B2C env vars confirmed |
 | 4 | Crypto withdrawal — audit & test | NEXUS | PENDING | Withdraw queue exists in `withdraw.ts`, needs full flow test |
-| 5 | Spot trade — connect Binance/Gate.io/Bybit, UX overhaul | FORGE | PENDING | `exchange.ts` is the aggregator — extend for 3 exchanges |
-| 6 | Futures — connect 3 exchanges, UX overhaul | FORGE | PENDING | `server/routes/futures.ts` exists |
-| 7 | Convert — handle locally (no external exchange) | FORGE | PENDING | Use internal balances + spread, not routed externally |
+| 5 | Spot trade — connect Binance/Gate.io/Bybit, UX overhaul | FORGE | DONE | exchange.ts spot layer, trade.ts rewritten, CEX routing live |
+| 6 | Futures — connect 3 exchanges, UX overhaul | FORGE | DONE | OKX/Binance/Bybit routing, FuturesTab complete |
+| 7 | Convert — handle locally (no external exchange) | FORGE | DONE | POST /trade/convert, 0.5% spread, internal balances |
 | 8 | Supported crypto — expand list, RLS audit | SHIELD | PENDING | tokens table has 50 seeded — expand + chain_fees + RLS on balances |
 
 ### HIGH PRIORITY
@@ -365,7 +365,36 @@ Update this section when you complete or start a task. Format:
   REQUIRES: ETHERSCAN_API_KEY in Vercel for EVM deposit scanning to work.
 
 # FORGE STATUS
-(no updates yet)
+[FORGE] 2026-04-08 Task 5 DONE — Spot trading live on Binance/Gate.io/Bybit.
+  server/services/exchange.ts — added full spot layer:
+    getBestSpotPrice(): public price feed, tries Binance→Gate.io→Bybit
+    routeSpotOrder(): executes via exchange_keys table, auto-fallback
+    binancePlaceSpotOrder / gatePlaceSpotOrder / bybitPlaceSpotOrder
+  server/routes/trade.ts — full rewrite:
+    POST /quote: live CEX price + KES equiv + 0.3% spread
+    POST /submit: instant CEX execution, balance debit/credit, ledger entries
+    GET /price/:symbol: quick price check
+  PREREQ: exchange_keys table must have at least one active Binance/Gate.io/Bybit key
+          (add via Admin → Settings, exchange column must be 'binance'|'gateio'|'bybit')
+
+[FORGE] 2026-04-08 Task 6 DONE — Futures already fully implemented (confirmed).
+  server/routes/futures.ts: open/close/positions/summary/tp-sl all working
+  server/services/exchange.ts: OKX primary + Binance/Bybit fallback routing
+  components/trade/FuturesTab.tsx: full UI with leverage selector, TP/SL, positions list
+
+[FORGE] 2026-04-08 Task 7 DONE — Internal convert working with 0.5% spread.
+  server/routes/trade.ts: POST /trade/convert
+    Pure internal swap using getBestSpotPrice for both sides
+    0.5% spread, dual ledger entries, fulfillment_type: 'internal'
+  app/(app)/convert/page.tsx: rewritten to call /trade/convert directly
+  lib/hooks/useTrades.ts: useConvert() mutation hook added
+
+[FORGE] 2026-04-08 Migration 014 added:
+  supabase/migrations/014_trades_spot_and_convert.sql
+  - Adds exchange_order_id, exchange_name, note, updated_at to trades table
+  - Extends status CHECK: adds 'executing'
+  - Extends fulfillment_type CHECK: adds 'exchange', 'internal'
+  REQUIRES: Apply migration 014 to Supabase before deploying
 
 # SHIELD STATUS
 [SHIELD] [2026-04-08] Task 8 DONE — Migration 012_rls_custom_jwt.sql: replaced all auth.uid() RLS policies with get_app_uid() that reads request.jwt.claims->>'uid'. Added .setSubject(uid) to JWT. PREREQ: Supabase JWT secret must match JWT_SECRET in Vercel env.
