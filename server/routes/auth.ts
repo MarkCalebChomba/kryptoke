@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { signJwt } from "@/server/services/jwt";
+import { signJwt, revokeJwt } from "@/server/services/jwt";
 import { sendEmailOtp, sendPhoneOtp, verifyOtp } from "@/server/services/otp";
 import { deriveDepositAddress } from "@/server/services/wallet";
 import {
@@ -322,8 +322,13 @@ auth.get("/me", authMiddleware, async (c) => {
 /* ─── POST /logout ──────────────────────────────────────────────────────── */
 
 auth.post("/logout", authMiddleware, async (c) => {
-  // JWT is stateless — client clears the token
-  // In future: add token to a Redis blocklist for immediate invalidation
+  // Revoke token immediately — adds to Redis blocklist so it can't be reused
+  // even within the remaining 7-day expiry window
+  const authHeader = c.req.header("Authorization") ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (token) {
+    await revokeJwt(token).catch(() => undefined); // non-fatal if Redis is down
+  }
   return c.json({ success: true, data: { message: "Logged out successfully" } });
 });
 
