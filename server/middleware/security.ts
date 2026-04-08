@@ -118,11 +118,14 @@ const SAFARICOM_IP_RANGES = [
 ];
 
 export async function safaricomIpGuard(c: Context, next: Next): Promise<Response | void> {
-  if (process.env.NODE_ENV !== "production") {
+  // Sandbox mode: allow all IPs — Safaricom sandbox callbacks originate from non-production IPs
+  const isSandbox = process.env.MPESA_ENVIRONMENT !== "production";
+  if (isSandbox) {
     await next();
     return;
   }
 
+  // Production: enforce Safaricom IP allowlist
   const xForwardedFor = c.req.header("x-forwarded-for") ?? "";
   const clientIp =
     c.req.header("cf-connecting-ip") ??
@@ -133,13 +136,8 @@ export async function safaricomIpGuard(c: Context, next: Next): Promise<Response
   console.log(`[safaricomIpGuard] callback from IP: ${clientIp}`);
 
   if (!SAFARICOM_IP_RANGES.includes(clientIp)) {
-    // In sandbox mode, allow all IPs — sandbox callbacks come from non-Safaricom IPs
-    const isSandbox = process.env.MPESA_ENVIRONMENT !== "production";
-    if (isSandbox) {
-      console.warn(`[safaricomIpGuard] Sandbox — allowing callback from: ${clientIp}`);
-      await next();
-      return;
-    }
+    console.warn(`[safaricomIpGuard] BLOCKED callback from non-Safaricom IP: ${clientIp}`);
+    // Return 200 to Safaricom so they don't retry — but don't process
     return c.json({ ResultCode: 0, ResultDesc: "Accepted" });
   }
 

@@ -310,7 +310,22 @@ Update this section when you complete or start a task. Format:
 
 ```
 # NEXUS STATUS
-(no updates yet)
+[NEXUS] 2026-04-08 Task 1 IN PROGRESS — M-Pesa deposit audit complete + fixes applied.
+  Fixes:
+  1. server/middleware/security.ts — safaricomIpGuard: removed dead NODE_ENV outer check,
+     logic now driven solely by MPESA_ENVIRONMENT (sandbox = allow all, production = enforce IP list)
+  2. server/routes/mpesa.ts — processCallback: atomic 'completing' status claim before balance write
+     prevents double-credit on concurrent Safaricom callback retries
+  3. server/routes/mpesa.ts — /status/:txId polling: same atomic claim fix applied
+  4. server/routes/mpesa.ts — POST /test-callback added (admin-only, blocked in production MPESA_ENVIRONMENT)
+  5. server/jobs/b2c-recovery.ts — recoverStuckCompletingDeposits() added: resets deposits
+     stuck in 'completing' > 5min back to 'processing' for retry
+  6. supabase/migrations/012_deposit_completing_status.sql — adds 'completing' to status CHECK
+     constraint on deposits table + index + updated_at trigger
+  PENDING: Migration 012 needs to be applied to Supabase before deploying.
+  PENDING: Confirm KES balance tracking intent — deposits credit USDT only, KES balance never written.
+  PENDING: Env vars to verify in Vercel: MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET,
+           MPESA_PAYBILL, MPESA_PASSKEY, MPESA_CALLBACK_BASE_URL, MPESA_ENVIRONMENT
 
 # FORGE STATUS
 (no updates yet)

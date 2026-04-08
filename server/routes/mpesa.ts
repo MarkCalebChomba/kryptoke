@@ -169,16 +169,33 @@ async function processCallback(body: unknown): Promise<void> {
   if (deposit.status === "completed" || deposit.status === "failed") return;
 
   if (data.resultCode !== 0) {
-    // Payment failed or cancelled
+    // Payment failed or cancelled — atomic update: only update if still in processing state
     await db
       .from("deposits")
       .update({ status: "failed" })
-      .eq("id", deposit.id);
+      .eq("id", deposit.id)
+      .in("status", ["pending", "processing"]); // guard against concurrent updates
     logDepositPhase(deposit.id, deposit.uid, "failed", { result_code: data.resultCode });
     return;
   }
 
-  // Payment successful
+  // Payment successful — atomic status flip: mark as completing FIRST to prevent double-credit
+  // Only proceed if we successfully claimed the record from a non-completed state
+  const { data: claimed, error: claimError } = await db
+    .from("deposits")
+    .update({ status: "completing" })
+    .eq("id", deposit.id)
+    .in("status", ["pending", "processing"])
+    .select("id")
+    .single();
+
+  if (claimError || !claimed) {
+    // Another process already claimed this deposit — skip to prevent double credit
+    console.warn(`[M-Pesa Callback] Deposit ${deposit.id} already being processed — skipping duplicate`);
+    logDepositPhase(deposit.id, deposit.uid, "duplicate_skipped", { checkout_request_id: data.checkoutRequestId });
+    return;
+  }
+
   const kesPerUsd = deposit.kes_per_usd ?? "130";
   const amountKes = deposit.amount_kes;
 
@@ -272,6 +289,21 @@ mpesa.get(
           const queryResult = await queryStkStatus(deposit.checkout_request_id);
 
           if (queryResult.resultCode === 0 && deposit.status !== "completed") {
+            // Atomic claim — prevent double-credit if callback fires at the same time
+            const { data: pollClaimed } = await db
+              .from("deposits")
+              .update({ status: "completing" })
+              .eq("id", deposit.id)
+              .in("status", ["pending", "processing"])
+              .select("id")
+              .single();
+
+            if (!pollClaimed) {
+              // Already claimed by callback handler — just re-fetch and return current state
+              const { data: fresh } = await db.from("deposits").select("*").eq("id", deposit.id).single();
+              return c.json({ success: true, data: fresh ?? deposit });
+            }
+
             // Payment confirmed via query — process it
             const kesPerUsd = deposit.kes_per_usd ?? "130";
             const amountKes = deposit.amount_kes;
@@ -305,7 +337,9 @@ mpesa.get(
 
           } else if (queryResult.resultCode !== 0 && queryResult.resultCode !== 1032) {
             // Failed (not just "in progress" code 1032)
-            await db.from("deposits").update({ status: "failed" }).eq("id", deposit.id);
+            await db.from("deposits").update({ status: "failed" })
+              .eq("id", deposit.id)
+              .in("status", ["pending", "processing"]); // guard concurrent updates
             logDepositPhase(deposit.id, uid, "failed", { source: "polling", result_code: queryResult.resultCode });
             return c.json({ success: true, data: { ...deposit, status: "failed" }});
           }
@@ -502,6 +536,102 @@ mpesa.get("/logs/:txId", authMiddleware, withApiRateLimit(), async (c) => {
     .order("created_at", { ascending: true });
 
   return c.json({ success: true, data: data ?? [] });
+});
+
+/* ─── POST /test-callback — simulate Safaricom callback (non-production only) ─ */
+// Admin-only. Lets you trigger the full deposit → balance credit flow without a real payment.
+// Usage: POST /api/v1/mpesa/test-callback { txId, resultCode }
+// resultCode 0 = success, anything else = failure (e.g. 1032 = cancelled)
+
+mpesa.post("/test-callback", async (c) => {
+  // Hard-block in production — this route must never exist in prod
+  if (process.env.MPESA_ENVIRONMENT === "production" || process.env.NODE_ENV === "production") {
+    return c.json({ success: false, error: "Not available in production", statusCode: 403 }, 403);
+  }
+
+  const { adminMiddleware } = await import("@/server/middleware/auth");
+  // Manually run admin check
+  let isAdmin = false;
+  await adminMiddleware(c, async () => { isAdmin = true; });
+  if (!isAdmin) {
+    return c.json({ success: false, error: "Admin only", statusCode: 403 }, 403);
+  }
+
+  const body = await c.req.json().catch(() => ({})) as {
+    txId?: string;
+    resultCode?: number;
+    mpesaCode?: string;
+  };
+
+  const { txId, resultCode = 0, mpesaCode } = body;
+
+  if (!txId) {
+    return c.json({ success: false, error: "txId is required", statusCode: 400 }, 400);
+  }
+
+  const db = getDb();
+  const { data: deposit, error } = await db
+    .from("deposits")
+    .select("*")
+    .eq("id", txId)
+    .single();
+
+  if (error || !deposit) {
+    return c.json({ success: false, error: "Deposit not found", statusCode: 404 }, 404);
+  }
+
+  if (!deposit.checkout_request_id) {
+    return c.json({ success: false, error: "Deposit has no checkout_request_id — STK push may not have fired yet", statusCode: 400 }, 400);
+  }
+
+  // Build a synthetic Safaricom callback body
+  const fakeReceipt = mpesaCode ?? `TEST${Date.now().toString().slice(-8)}`;
+  const fakeCallback = {
+    Body: {
+      stkCallback: {
+        MerchantRequestID: "test-merchant-id",
+        CheckoutRequestID: deposit.checkout_request_id,
+        ResultCode: resultCode,
+        ResultDesc: resultCode === 0 ? "The service request is processed successfully." : "Request cancelled by user",
+        ...(resultCode === 0 && {
+          CallbackMetadata: {
+            Item: [
+              { Name: "Amount", Value: parseFloat(deposit.amount_kes) },
+              { Name: "MpesaReceiptNumber", Value: fakeReceipt },
+              { Name: "TransactionDate", Value: parseInt(new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14)) },
+              { Name: "PhoneNumber", Value: deposit.phone },
+            ],
+          },
+        }),
+      },
+    },
+  };
+
+  logDepositPhase(deposit.id, deposit.uid, "test_callback_injected", {
+    result_code: resultCode,
+    fake_receipt: fakeReceipt,
+    injected_by: "admin",
+  });
+
+  // Run through the real processCallback — same path as a real Safaricom callback
+  await processCallback(fakeCallback);
+
+  // Fetch final state
+  const { data: updated } = await db
+    .from("deposits")
+    .select("id, status, amount_kes, usdt_credited, mpesa_code, completed_at")
+    .eq("id", txId)
+    .single();
+
+  return c.json({
+    success: true,
+    message: "Test callback processed",
+    data: {
+      deposit: updated,
+      simulatedResultCode: resultCode,
+      fakeReceiptNumber: resultCode === 0 ? fakeReceipt : null,
+    },
+  });
 });
 
 export default mpesa;
