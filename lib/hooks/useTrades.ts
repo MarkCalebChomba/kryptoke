@@ -57,3 +57,38 @@ export function useOrderBook(symbol: string) {
     enabled: !!symbol,
   });
 }
+
+export interface ConvertPayload {
+  fromAsset: string;
+  toAsset: string;
+  amount: string;
+}
+
+export interface ConvertResult {
+  tradeId: string;
+  fromAsset: string;
+  toAsset: string;
+  fromAmount: string;
+  toAmount: string;
+  rate: string;
+  fee: string;
+  feePct: string;
+  kesEquiv: string;
+}
+
+export function useConvert() {
+  const queryClient = useQueryClient();
+  const toast = useToastActions();
+
+  return useMutation({
+    mutationFn: (payload: ConvertPayload) =>
+      apiPost<ConvertResult>("/trade/convert", payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["trade", "history"] });
+      queryClient.invalidateQueries({ queryKey: ["wallet", "info"] });
+    },
+    onError: (err) => {
+      toast.error("Conversion failed", err instanceof Error ? err.message : undefined);
+    },
+  });
+}

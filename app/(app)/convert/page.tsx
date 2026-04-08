@@ -1,17 +1,15 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/shared/TopBar";
-import { useTradeQuote, useSubmitTrade } from "@/lib/hooks/useTrades";
+import { useConvert } from "@/lib/hooks/useTrades";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { useToastActions } from "@/components/shared/ToastContainer";
-import { sanitizeNumberInput, formatKes } from "@/lib/utils/formatters";
+import { sanitizeNumberInput } from "@/lib/utils/formatters";
 import { apiGet } from "@/lib/api/client";
 import { cn } from "@/lib/utils/cn";
 
-// ─── Types ────────────────────────────────────────────────────────────────
 interface ConvertHistoryItem {
   id: string;
   from_asset: string;
@@ -25,17 +23,16 @@ interface ConvertHistoryItem {
 }
 
 const PAIRS = [
-  { from: "KES",  to: "USDT", label: "KES → USDT",  icon: "🇰🇪" },
-  { from: "USDT", to: "KES",  label: "USDT → KES",   icon: "💵" },
+  { from: "KES",  to: "USDT", label: "KES → USDT", icon: "🇰🇪" },
+  { from: "USDT", to: "KES",  label: "USDT → KES",  icon: "💵" },
 ];
 
 const QUICK_PCTS = [25, 50, 75, 100] as const;
+const SPREAD = 0.005;
 
 export default function ConvertPage() {
-  const router = useRouter();
   const toast = useToastActions();
   const [activeTab, setActiveTab] = useState<"convert" | "history">("convert");
-
   const [fromAsset, setFromAsset] = useState("KES");
   const [toAsset,   setToAsset]   = useState("USDT");
   const [amount, setAmount] = useState("");
@@ -43,23 +40,16 @@ export default function ConvertPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const { usdtBalance, kesBalance, rate } = useWallet();
-  const { mutateAsync: submitTrade, isPending: submitting } = useSubmitTrade();
+  const { mutateAsync: convertAssets, isPending: submitting } = useConvert();
 
   const fromBalance = fromAsset === "KES" ? kesBalance : usdtBalance;
-  const kesPerUsd   = rate?.kesPerUsd ?? "130";
+  const kesPerUsd   = parseFloat(rate?.kesPerUsd ?? "130");
 
-  // Live quote (debounced)
-  const [debouncedAmt, setDebouncedAmt] = useState("");
   function handleAmountChange(val: string) {
     const clean = fromAsset === "KES" ? sanitizeNumberInput(val, 0) : sanitizeNumberInput(val, 6);
     setAmount(clean);
     clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedAmt(clean), 400);
   }
-
-  const { data: quote, isFetching: quoting } = useTradeQuote(
-    !!debouncedAmt && parseFloat(debouncedAmt) > 0 ? { fromAsset, toAsset, amount: debouncedAmt } : null
-  );
 
   const { data: history } = useQuery({
     queryKey: ["trade", "history"],
@@ -72,55 +62,61 @@ export default function ConvertPage() {
     setFromAsset(toAsset);
     setToAsset(fromAsset);
     setAmount("");
-    setDebouncedAmt("");
   }
 
   function fillPct(pct: number) {
     const bal = parseFloat(fromBalance);
     if (bal <= 0) return;
-    const fill = (bal * pct / 100).toFixed(fromAsset === "KES" ? 0 : 4);
-    setAmount(fill);
-    setDebouncedAmt(fill);
+    setAmount((bal * pct / 100).toFixed(fromAsset === "KES" ? 0 : 4));
   }
 
   async function handleConvert() {
-    if (!quote || submitting) return;
+    if (!amount || parseFloat(amount) <= 0 || submitting) return;
     try {
-      await submitTrade({ fromAsset, toAsset, amount, expectedRate: quote.rate });
-      toast.success("Converted successfully");
+      const result = await convertAssets({ fromAsset, toAsset, amount });
+      const received = parseFloat(result.toAmount);
+      toast.success(
+        "Converted successfully",
+        `Received ${received.toFixed(toAsset === "KES" ? 0 : 6)} ${result.toAsset}`
+      );
       setAmount("");
-      setDebouncedAmt("");
       setConfirming(false);
     } catch (err) {
       toast.error("Conversion failed", err instanceof Error ? err.message : "");
     }
   }
 
-  const receiveAmount = quote?.toAmount
-    ?? (amount && parseFloat(amount) > 0
-      ? fromAsset === "KES"
-        ? (parseFloat(amount) / parseFloat(kesPerUsd)).toFixed(6)
-        : (parseFloat(amount) * parseFloat(kesPerUsd)).toFixed(0)
-      : "");
+  const receiveAmount = (() => {
+    const n = parseFloat(amount);
+    if (!n || n <= 0) return "";
+    if (fromAsset === "KES") return (n / kesPerUsd * (1 - SPREAD)).toFixed(6);
+    return (n * kesPerUsd * (1 - SPREAD)).toFixed(0);
+  })();
+
+  const feeEstimate = (() => {
+    const n = parseFloat(amount);
+    if (!n) return "";
+    return fromAsset === "KES"
+      ? `${(n * SPREAD).toFixed(0)} KES`
+      : `${(n * SPREAD).toFixed(4)} USDT`;
+  })();
 
   return (
     <div className="screen">
       <TopBar title="Convert" showBack />
 
-      {/* Tabs */}
       <div className="mx-4 mt-4 mb-4 tab-bar">
         <button data-active={activeTab === "convert"} onClick={() => setActiveTab("convert")} className="tab-item">Convert</button>
-        <button data-active={activeTab === "history"} onClick={() => setActiveTab("history")} className="tab-item">Order History</button>
+        <button data-active={activeTab === "history"} onClick={() => setActiveTab("history")} className="tab-item">History</button>
       </div>
 
-      {/* ── Convert Tab ───────────────────────────────────────────────── */}
       {activeTab === "convert" && (
         <div className="px-4 space-y-4">
           {/* Direction selector */}
           <div className="flex gap-2">
             {PAIRS.map((p) => (
               <button key={p.label}
-                onClick={() => { setFromAsset(p.from); setToAsset(p.to); setAmount(""); setDebouncedAmt(""); }}
+                onClick={() => { setFromAsset(p.from); setToAsset(p.to); setAmount(""); }}
                 className={cn("flex-1 py-2 rounded-xl border font-outfit text-xs font-semibold transition-all",
                   fromAsset === p.from && toAsset === p.to
                     ? "bg-primary/15 border-primary text-primary"
@@ -147,7 +143,6 @@ export default function ConvertPage() {
                 className="flex-1 bg-transparent font-price text-lg text-text-primary outline-none text-right"
                 placeholder="0" />
             </div>
-            {/* Quick % buttons */}
             <div className="flex gap-1.5">
               {QUICK_PCTS.map((pct) => (
                 <button key={pct} onClick={() => fillPct(pct)}
@@ -168,32 +163,24 @@ export default function ConvertPage() {
 
           {/* To field */}
           <div className="card">
-            <p className="font-outfit text-xs text-text-muted mb-1">You Receive</p>
+            <p className="font-outfit text-xs text-text-muted mb-1">You Receive (estimated)</p>
             <div className="flex items-center gap-3 bg-bg-surface2 rounded-xl px-3 py-2.5 border border-border">
               <span className="font-outfit text-sm font-bold text-text-primary w-12">{toAsset}</span>
               <div className="flex-1 text-right">
-                {quoting ? (
-                  <div className="skeleton h-6 w-24 ml-auto rounded" />
-                ) : (
-                  <span className="font-price text-lg text-text-primary">{receiveAmount || "0"}</span>
-                )}
+                <span className="font-price text-lg text-text-primary">{receiveAmount || "0"}</span>
               </div>
             </div>
-            {quote && (
-              <p className="font-outfit text-[10px] text-text-muted mt-1.5">
-                Rate: 1 {fromAsset === "USDT" ? "USDT" : "USD"} = KSh {parseFloat(kesPerUsd).toFixed(2)}
-                {quote.fee && <span className="ml-2">· Fee: {quote.fee}</span>}
-              </p>
-            )}
+            <p className="font-outfit text-[10px] text-text-muted mt-1.5">
+              Rate: 1 USD = KSh {kesPerUsd.toFixed(2)} · 0.5% spread included
+            </p>
           </div>
 
-          {/* Convert button */}
           {!confirming ? (
             <button
               onClick={() => { if (!amount || parseFloat(amount) <= 0) return; setConfirming(true); }}
-              disabled={!amount || parseFloat(amount) <= 0 || quoting}
+              disabled={!amount || parseFloat(amount) <= 0}
               className="btn-primary disabled:opacity-50">
-              Get Quote
+              Preview Conversion
             </button>
           ) : (
             <div className="card border-primary/30 bg-primary/5 space-y-3">
@@ -204,16 +191,16 @@ export default function ConvertPage() {
                   <span className="font-price text-sm text-text-primary">{amount} {fromAsset}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-outfit text-xs text-text-muted">You receive</span>
+                  <span className="font-outfit text-xs text-text-muted">You receive ~</span>
                   <span className="font-price text-sm text-up font-semibold">{receiveAmount} {toAsset}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="font-outfit text-xs text-text-muted">Rate</span>
-                  <span className="font-price text-xs text-text-secondary">1 USD = KSh {parseFloat(kesPerUsd).toFixed(2)}</span>
+                  <span className="font-price text-xs text-text-secondary">1 USD = KSh {kesPerUsd.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-outfit text-xs text-text-muted">Fee</span>
-                  <span className="font-price text-xs text-text-secondary">Included in rate</span>
+                  <span className="font-outfit text-xs text-text-muted">Fee (0.5%)</span>
+                  <span className="font-price text-xs text-text-secondary">{feeEstimate}</span>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -223,25 +210,22 @@ export default function ConvertPage() {
                 </button>
                 <button onClick={handleConvert} disabled={submitting}
                   className="py-2.5 rounded-xl bg-primary font-outfit text-sm font-bold text-bg disabled:opacity-50">
-                  {submitting ? "Converting..." : "Confirm"}
+                  {submitting ? "Converting…" : "Confirm"}
                 </button>
               </div>
             </div>
           )}
 
-          {/* Info card */}
           <div className="card bg-bg-surface2 space-y-2">
             <p className="font-outfit text-xs font-semibold text-text-primary">About Convert</p>
             <p className="font-outfit text-xs text-text-muted leading-relaxed">
-              Convert lets you instantly exchange between KES and USDT at the current market rate.
-              No order book, no spread — just a simple swap. The rate is locked for 10 seconds after
-              you click Get Quote.
+              Convert exchanges between KES and USDT using internal balances — no external exchange
+              involved. A 0.5% spread is included in the rate shown.
             </p>
           </div>
         </div>
       )}
 
-      {/* ── History Tab ───────────────────────────────────────────────── */}
       {activeTab === "history" && (
         <div className="px-4">
           {!history ? (
@@ -267,15 +251,23 @@ export default function ConvertPage() {
                       {item.from_asset} → {item.to_asset}
                     </p>
                     <p className="font-outfit text-[10px] text-text-muted">
-                      {new Date(item.created_at).toLocaleDateString("en-KE", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {new Date(item.created_at).toLocaleDateString("en-KE", {
+                        month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                      })}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-price text-xs text-text-primary">{parseFloat(item.from_amount).toFixed(2)} {item.from_asset}</p>
-                    <p className="font-price text-xs text-up">+{parseFloat(item.to_amount).toFixed(2)} {item.to_asset}</p>
+                    <p className="font-price text-xs text-text-primary">
+                      -{parseFloat(item.from_amount).toFixed(item.from_asset === "KES" ? 0 : 4)} {item.from_asset}
+                    </p>
+                    <p className="font-price text-xs text-up">
+                      +{parseFloat(item.to_amount).toFixed(item.to_asset === "KES" ? 0 : 6)} {item.to_asset}
+                    </p>
                   </div>
-                  <span className={cn("font-outfit text-[9px] px-1.5 py-0.5 rounded font-semibold",
-                    item.status === "completed" ? "bg-up/15 text-up" : "bg-border text-text-muted")}>
+                  <span className={cn(
+                    "font-outfit text-[9px] px-1.5 py-0.5 rounded font-semibold shrink-0",
+                    item.status === "completed" ? "bg-up/15 text-up" : "bg-border text-text-muted"
+                  )}>
                     {item.status}
                   </span>
                 </div>

@@ -368,3 +368,282 @@ export async function routeCloseToExchange(params: {
     leverage: 1,
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPOT TRADING — Binance, Gate.io, Bybit
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SpotQuote {
+  exchange: string;
+  symbol: string;         // e.g. "BTC"
+  side: "buy" | "sell";
+  price: string;          // USD price per unit
+  estimatedFill: string;  // amount user receives
+  feeRate: number;        // e.g. 0.001
+  rawPrice: number;
+}
+
+export interface SpotOrderResult {
+  exchange: string;
+  orderId: string;
+  symbol: string;
+  side: "buy" | "sell";
+  executedPrice: string;
+  executedQty: string;    // base asset qty filled
+  quoteQty: string;       // quote (USDT) qty filled
+  fee: string;
+  status: "filled" | "partial";
+}
+
+// ── Binance Spot ────────────────────────────────────────────────────────────
+
+async function binanceSpotRequest(
+  key: ExchangeKey,
+  method: string,
+  path: string,
+  params: Record<string, string> = {}
+): Promise<unknown> {
+  const base = key.isTestnet ? "https://testnet.binance.vision" : "https://api.binance.com";
+  const ts = Date.now().toString();
+  const allParams = { ...params, timestamp: ts };
+  const qs = new URLSearchParams(allParams).toString();
+  const sig = bnbSign(qs, key.apiSecret);
+  const url = `${base}${path}?${qs}&signature=${sig}`;
+  const res = await fetch(url, {
+    method,
+    headers: { "X-MBX-APIKEY": key.apiKey },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Binance Spot: ${JSON.stringify(err)}`);
+  }
+  return res.json();
+}
+
+export async function binanceSpotPrice(symbol: string): Promise<number> {
+  const res = await fetch(
+    `https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}USDT`,
+    { signal: AbortSignal.timeout(5000) }
+  );
+  if (!res.ok) throw new Error("Binance price fetch failed");
+  const data = (await res.json()) as { price: string };
+  return parseFloat(data.price);
+}
+
+export async function binancePlaceSpotOrder(
+  key: ExchangeKey,
+  params: { symbol: string; side: "buy" | "sell"; quantity: string; orderType: "market" | "limit"; price?: string }
+): Promise<SpotOrderResult> {
+  const orderParams: Record<string, string> = {
+    symbol: `${params.symbol.toUpperCase()}USDT`,
+    side: params.side.toUpperCase(),
+    type: params.orderType === "limit" ? "LIMIT" : "MARKET",
+    ...(params.orderType === "market"
+      ? { quoteOrderQty: params.quantity } // market buy: spend `quantity` USDT
+      : { quantity: params.quantity, price: params.price!, timeInForce: "IOC" }),
+  };
+  const result = await binanceSpotRequest(key, "POST", "/api/v3/order", orderParams) as {
+    orderId: number; executedQty: string; cummulativeQuoteQty: string; fills?: { price: string }[];
+  };
+  const avgPrice = result.fills?.length
+    ? result.fills[0].price
+    : (parseFloat(result.cummulativeQuoteQty) / parseFloat(result.executedQty || "1")).toFixed(8);
+
+  return {
+    exchange: "binance",
+    orderId: String(result.orderId),
+    symbol: params.symbol,
+    side: params.side,
+    executedPrice: avgPrice,
+    executedQty: result.executedQty,
+    quoteQty: result.cummulativeQuoteQty,
+    fee: (parseFloat(result.cummulativeQuoteQty) * 0.001).toFixed(8),
+    status: "filled",
+  };
+}
+
+// ── Gate.io Spot ────────────────────────────────────────────────────────────
+
+function gateSign(
+  method: string, path: string, query: string, body: string,
+  secret: string, timestamp: string
+): string {
+  const bodyHash = crypto.createHash("sha512").update(body).digest("hex");
+  const msg = `${method}\n${path}\n${query}\n${bodyHash}\n${timestamp}`;
+  return crypto.createHmac("sha512", secret).update(msg).digest("hex");
+}
+
+async function gateRequest(
+  key: ExchangeKey, method: string, path: string,
+  query = "", body = ""
+): Promise<unknown> {
+  const base = key.isTestnet ? "https://fx-api-testnet.gateio.ws" : "https://api.gateio.ws";
+  const ts = Math.floor(Date.now() / 1000).toString();
+  const sign = gateSign(method, path, query, body, key.apiSecret, ts);
+  const url = `${base}${path}${query ? `?${query}` : ""}`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      "KEY":       key.apiKey,
+      "SIGN":      sign,
+      "Timestamp": ts,
+      "Content-Type": "application/json",
+    },
+    body: body || undefined,
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Gate.io: ${JSON.stringify(err)}`);
+  }
+  return res.json();
+}
+
+export async function gateSpotPrice(symbol: string): Promise<number> {
+  const res = await fetch(
+    `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${symbol.toUpperCase()}_USDT`,
+    { signal: AbortSignal.timeout(5000) }
+  );
+  if (!res.ok) throw new Error("Gate.io price fetch failed");
+  const data = (await res.json()) as { last: string }[];
+  if (!data[0]) throw new Error("Gate.io no ticker data");
+  return parseFloat(data[0].last);
+}
+
+export async function gatePlaceSpotOrder(
+  key: ExchangeKey,
+  params: { symbol: string; side: "buy" | "sell"; quantity: string; orderType: "market" | "limit"; price?: string }
+): Promise<SpotOrderResult> {
+  const pair = `${params.symbol.toUpperCase()}_USDT`;
+  const bodyObj = {
+    currency_pair: pair,
+    type: params.orderType,
+    account: "spot",
+    side: params.side,
+    // For market buy: use `amount` as quote (USDT) amount
+    ...(params.orderType === "market" && params.side === "buy"
+      ? { amount: params.quantity, time_in_force: "ioc" }
+      : { amount: params.quantity, time_in_force: "ioc" }),
+    ...(params.orderType === "limit" && params.price ? { price: params.price } : {}),
+  };
+  const body = JSON.stringify(bodyObj);
+  const result = await gateRequest(key, "POST", "/api/v4/spot/orders", "", body) as {
+    id: string; fill_price: string; amount: string; filled_amount?: string;
+  };
+  return {
+    exchange: "gateio",
+    orderId: result.id,
+    symbol: params.symbol,
+    side: params.side,
+    executedPrice: result.fill_price ?? params.price ?? "0",
+    executedQty: result.filled_amount ?? result.amount,
+    quoteQty: (parseFloat(result.filled_amount ?? result.amount) * parseFloat(result.fill_price ?? "0")).toFixed(8),
+    fee: (parseFloat(result.amount) * 0.002).toFixed(8),
+    status: "filled",
+  };
+}
+
+// ── Bybit Spot ──────────────────────────────────────────────────────────────
+
+export async function bybitSpotPrice(symbol: string): Promise<number> {
+  const res = await fetch(
+    `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${symbol.toUpperCase()}USDT`,
+    { signal: AbortSignal.timeout(5000) }
+  );
+  if (!res.ok) throw new Error("Bybit spot price fetch failed");
+  const json = (await res.json()) as { result: { list: { lastPrice: string }[] } };
+  return parseFloat(json.result?.list?.[0]?.lastPrice ?? "0");
+}
+
+export async function bybitPlaceSpotOrder(
+  key: ExchangeKey,
+  params: { symbol: string; side: "buy" | "sell"; quantity: string; orderType: "market" | "limit"; price?: string }
+): Promise<SpotOrderResult> {
+  const result = await bybitRequest(key, "POST", "/v5/order/create", {
+    category: "spot",
+    symbol: `${params.symbol.toUpperCase()}USDT`,
+    side: params.side === "buy" ? "Buy" : "Sell",
+    orderType: params.orderType === "limit" ? "Limit" : "Market",
+    qty: params.quantity,
+    marketUnit: "quoteCoin", // market buy: qty = USDT to spend
+    ...(params.orderType === "limit" && params.price ? { price: params.price } : {}),
+  }) as { orderId: string; avgPrice?: string; cumExecQty?: string; cumExecValue?: string };
+
+  return {
+    exchange: "bybit",
+    orderId: result.orderId,
+    symbol: params.symbol,
+    side: params.side,
+    executedPrice: result.avgPrice ?? params.price ?? "0",
+    executedQty: result.cumExecQty ?? params.quantity,
+    quoteQty: result.cumExecValue ?? "0",
+    fee: (parseFloat(result.cumExecValue ?? "0") * 0.001).toFixed(8),
+    status: "filled",
+  };
+}
+
+// ── Best spot price across all 3 exchanges (no auth needed) ─────────────────
+
+const SPOT_PRICE_EXCHANGES = [
+  { name: "binance", fn: binanceSpotPrice },
+  { name: "gateio",  fn: gateSpotPrice    },
+  { name: "bybit",   fn: bybitSpotPrice   },
+];
+
+export async function getBestSpotPrice(symbol: string): Promise<{ price: number; exchange: string }> {
+  // Special cases
+  if (symbol === "USDT") return { price: 1, exchange: "internal" };
+  if (symbol === "USDC") return { price: 1, exchange: "internal" };
+
+  const results = await Promise.allSettled(
+    SPOT_PRICE_EXCHANGES.map(async (e) => ({ exchange: e.name, price: await e.fn(symbol) }))
+  );
+
+  // Use Binance first (most reliable), fall back to others
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value.price > 0) return r.value;
+  }
+  throw new Error(`Could not fetch spot price for ${symbol}`);
+}
+
+// ── Route a spot order to best available exchange ───────────────────────────
+
+export async function routeSpotOrder(params: {
+  symbol: string;
+  side: "buy" | "sell";
+  quantity: string;           // USDT amount for market buy, base asset qty for sell
+  orderType: "market" | "limit";
+  price?: string;
+}): Promise<SpotOrderResult> {
+  const keys = await getActiveKeys();
+  if (keys.length === 0) throw new Error("No active exchange keys. Configure them in Admin → Settings.");
+
+  const errors: string[] = [];
+  for (const key of keys) {
+    try {
+      let result: SpotOrderResult;
+      if (key.exchange === "binance") {
+        result = await binancePlaceSpotOrder(key, params);
+      } else if (key.exchange === "bybit") {
+        result = await bybitPlaceSpotOrder(key, params);
+      } else {
+        // Gate.io or OKX — skip OKX for spot (futures-only)
+        if (key.exchange === "okx") { errors.push("[okx] spot not supported"); continue; }
+        result = await gatePlaceSpotOrder(key, params);
+      }
+      const db = getDb();
+      await db.from("exchange_keys")
+        .update({ last_used_at: new Date().toISOString(), error_count: 0 })
+        .eq("id", key.id).catch(() => undefined);
+      return result;
+    } catch (e) {
+      errors.push(`[${key.exchange}] ${(e as Error).message}`);
+      const db = getDb();
+      await db.from("exchange_keys")
+        .update({ error_count: key.priority })
+        .eq("id", key.id).catch(() => undefined);
+    }
+  }
+  throw new Error(`All spot exchanges failed: ${errors.join("; ")}`);
+}
