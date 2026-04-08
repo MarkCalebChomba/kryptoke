@@ -327,6 +327,43 @@ Update this section when you complete or start a task. Format:
   PENDING: Env vars to verify in Vercel: MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET,
            MPESA_PAYBILL, MPESA_PASSKEY, MPESA_CALLBACK_BASE_URL, MPESA_ENVIRONMENT
 
+[NEXUS] 2026-04-08 Task 2 DONE — Crypto deposit scanning audited and fixed.
+  Fixes:
+  1. nonEvm.ts — TRON scanner: integer division precision bug fixed (toFixed(6))
+  2. nonEvm.ts — XRP DestinationTag matching was completely broken (decimal string vs hex).
+     Fixed: uint32 numeric comparison using parseInt(uid_hex_8, 16) >>> 0
+     Added: xrpDestinationTagForUser() — deposit UI MUST use this to show correct tag to user
+  3. nonEvm.ts — creditCryptoDeposit: replaced parseFloat addition with Big.js
+  4. sweep.ts — Complete rewrite: now covers BSC+ETH+Polygon+Arbitrum+Optimism+Base
+     Uses MASTER_SEED_PHRASE HD derivation (removed HOT_WALLET_KEY dependency)
+     Calls recoverStuckCompletingDeposits() after every sweep run
+  5. deposit-monitor/route.ts — Added scanEvmDeposits(): scans all users on all active EVM
+     chains via Etherscan V2, credits balance on new USDT/USDC transfers
+
+[NEXUS] 2026-04-08 Task 3 DONE — B2C withdrawal recovery hardened.
+  Fixes:
+  1. withdraw.ts — /b2c/timeout now marks withdrawal 'timed_out' immediately (was silent)
+  2. withdraw.ts — processB2cResult accepts 'timed_out' status so late callbacks still complete
+  3. b2c-recovery.ts — recovers both 'processing' and 'timed_out' statuses
+     Also covers 'mpesa_usdt' type (was kes-only)
+  PENDING: Env vars to confirm in Vercel:
+    MPESA_B2C_SHORTCODE, MPESA_B2C_INITIATOR_NAME, MPESA_B2C_INITIATOR_PASSWORD
+
+[NEXUS] 2026-04-08 Task 4 DONE — Crypto withdrawal queue audited.
+  Fixes:
+  1. deposit-monitor/route.ts — processWithdrawalQueue refund uses Big.js (was parseFloat)
+  Confirmed working: pending_cancel→queued→broadcasting→completed flow, admin approve/reject,
+  awaiting_admin email alerts, per-chain fee deduction, ledger entries.
+
+[NEXUS] 2026-04-08 Migration 013 added:
+  - 'timed_out' added to withdrawals status CHECK
+  - scanner_state table created (for XRP/TON/Stellar block position)
+  - crypto_deposits.chain_id ensured as TEXT
+  - Composite unique index on (tx_hash, chain_id)
+  - updated_at trigger on withdrawals
+  REQUIRES: Apply migration 013 to Supabase before deploying.
+  REQUIRES: ETHERSCAN_API_KEY in Vercel for EVM deposit scanning to work.
+
 # FORGE STATUS
 (no updates yet)
 
