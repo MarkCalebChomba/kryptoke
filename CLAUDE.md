@@ -461,3 +461,272 @@ Update this section when you complete or start a task. Format:
 ```
 
 Always push to `main`. Vercel auto-deploys on push.
+
+---
+
+## WAVE 2 — New Agent Tasks (2026-04-08)
+
+Four new chats. Each reads CLAUDE.md first then follows their brief below.
+
+---
+
+## GLOBAL — Agent Brief (Claude GLOBAL)
+
+You are **Claude GLOBAL**. Your job is to remove all Kenya/KES hardcoding and make KryptoKe work for any user in any country.
+
+### What to change
+
+**Database**
+- `deposits` and `withdrawals` tables: add `fiat_currency` (TEXT, default 'KES') and `fiat_amount` columns if not present.
+- `p2p_ads`: `fiat_currency` column already exists — verify it is not filtered to KES anywhere.
+- `balances`: KES balance account should become a generic fiat account keyed by currency.
+- New migration: `015_international.sql`
+
+**Server**
+- `server/services/forex.ts` — currently only fetches KES/USD. Extend to `getRate(fromCurrency, toCurrency)` using exchangerate-api.com or similar free API. Cache each pair in Redis for 5 minutes with key `forex:{from}:{to}`.
+- `server/routes/mpesa.ts` — the deposit route hardcodes KES. Add currency detection: if user's country is Kenya, default KES. Otherwise use their profile currency.
+- `server/routes/withdraw.ts` — same, fiat_currency should come from request body, validated against supported list.
+- `server/index.ts` — add a `GET /api/v1/config/supported-currencies` public endpoint that returns the list of supported fiat currencies and their payment methods.
+
+**Frontend**
+- `app/(app)/deposit/page.tsx` — replace hardcoded "KSh" with user's local currency symbol from their profile or browser locale.
+- `app/(app)/withdraw/page.tsx` — same.
+- `components/home/PortfolioCard.tsx` — show balance in user's chosen currency, not always KES.
+- `app/auth/register/page.tsx` — add country selector (stored in users table). Default to Kenya. This drives default currency.
+- All hardcoded "KES", "KSh", "Kenya Shillings" strings in UI must use a currency formatter that respects the user's setting.
+
+**Payment method abstraction**
+- Create `server/services/paymentProviders.ts` — a registry of payment providers per country:
+  ```ts
+  type Provider = { id: string; name: string; countries: string[]; currencies: string[]; type: 'mobile_money' | 'bank' | 'card' }
+  // Initially: { id: 'mpesa', name: 'M-Pesa', countries: ['KE'], currencies: ['KES'], type: 'mobile_money' }
+  // Structure for adding more: MTN Mobile Money (GH, NG, UG, ZM), Airtel Money (KE, TZ, UG), card (global)
+  ```
+- `GET /api/v1/config/payment-methods?country=KE` returns available methods for that country.
+- The deposit and withdrawal pages read from this endpoint to show the right options.
+
+**Do not break M-Pesa** — it should still work exactly as before for KE users. You are adding a layer above it, not replacing it.
+
+### Start command
+```
+I am Claude GLOBAL. I will read CLAUDE.md, then server/services/forex.ts, server/routes/mpesa.ts, app/auth/register/page.tsx. My job is to make KryptoKe work internationally — remove Kenya hardcoding, add currency awareness, abstract payment methods. Starting with migration 015_international.sql and the forex service.
+```
+
+---
+
+## P2P — Agent Brief (Claude P2P)
+
+You are **Claude P2P**. Your job is to build a proper international P2P trading architecture on top of the existing basic P2P routes.
+
+### Current state
+`server/routes/p2p.ts` has basic ad listing, ad creation, and order initiation. It is KES-only and has no dispute system, no escrow, no reputation, and no chat. Read it fully before starting.
+
+### What to build
+
+**Escrow system**
+- When a buyer places an order on a sell ad, the seller's crypto is locked in escrow immediately (deduct from trading balance, hold in a `p2p_escrow` record).
+- Crypto is only released to buyer when seller marks payment received OR dispute is resolved in buyer's favor.
+- If order expires (30 min default, configurable per ad) with no action, crypto returns to seller.
+- New table: `p2p_escrow` — columns: order_id, uid_seller, uid_buyer, asset, amount, status (held/released/returned/disputed), created_at, released_at.
+
+**Order lifecycle**
+```
+created → payment_pending → payment_sent (buyer marks) → completed (seller confirms) 
+                                                        → disputed → resolved_buyer / resolved_seller
+                         → expired (timer runs out)
+```
+- All state transitions must be atomic (use Postgres transactions via RPC or service-role client).
+- Every transition fires a notification to both parties.
+
+**Reputation & trust score**
+- After each completed order, both parties can rate 1–5 stars + optional text.
+- `p2p_ratings` table: rater_uid, rated_uid, order_id, stars, comment, created_at.
+- Each user gets a `p2p_stats` view: total_orders, completion_rate, avg_rating, avg_release_time_minutes.
+- Show these on the ad listing so buyers can choose trustworthy sellers.
+
+**In-order chat**
+- `p2p_messages` table: order_id, sender_uid, message, created_at.
+- `POST /p2p/orders/:id/messages` — send message (auth required, must be buyer or seller of that order).
+- `GET /p2p/orders/:id/messages` — get messages (same access control).
+- Messages subscribe via Supabase Realtime — both parties get them live.
+- No file uploads for now. Text only.
+
+**Multi-currency**
+- `fiat_currency` on ads is already there — verify the full flow supports any fiat, not just KES.
+- Payment methods on ads should use the registry from `server/services/paymentProviders.ts` (GLOBAL agent builds this — check if it exists, if not create a stub).
+- `GET /p2p/ads` must accept `?fiat=NGN` or `?fiat=USD` etc.
+
+**Dispute system**
+- Either party can raise a dispute on an order that is in `payment_sent` status.
+- Dispute creates an admin task visible in `/admin/support`.
+- Admin can resolve: release to buyer, return to seller, or split.
+- `p2p_disputes` table: order_id, raised_by_uid, reason, evidence_text, status, resolved_by_uid, resolution, created_at.
+
+**Access**
+- P2P must be accessible without being Kenyan. Any registered user from any country can post and take orders.
+- Ads visible to all authenticated users globally.
+
+### New migration
+`016_p2p_v2.sql` — escrow, ratings, messages, disputes tables + RLS (users see only their own orders/messages, ads are public-read).
+
+### Start command
+```
+I am Claude P2P. I will read CLAUDE.md, then server/routes/p2p.ts fully, then supabase/migrations/ to understand existing schema. My job is to build proper P2P escrow, reputation, in-order chat, and disputes. Starting with migration 016_p2p_v2.sql then the escrow service.
+```
+
+---
+
+## GAMIFY — Agent Brief (Claude GAMIFY)
+
+You are **Claude GAMIFY**. Your job is to make KryptoKe engaging and rewarding for good user behavior.
+
+### Philosophy
+Rewards go to users who make the platform better: completing KYC, trading actively, referring verified users, completing P2P orders cleanly, holding balances. Not for just signing up.
+
+### Points system
+
+**XP events** (server-side only, never client-triggered):
+| Event | XP |
+|---|---|
+| KYC verified | 500 |
+| First deposit | 200 |
+| First trade | 100 |
+| Each completed trade (>$10) | 10 |
+| P2P order completed (as seller) | 25 |
+| P2P order completed (as buyer) | 15 |
+| P2P 5-star rating received | 30 |
+| Referral completes KYC | 150 |
+| 7-day login streak | 50 |
+| 30-day login streak | 250 |
+| Portfolio held >30 days (any asset >$50) | 20/month |
+
+**Levels**: Bronze (0) → Silver (500) → Gold (2000) → Platinum (10000) → Diamond (50000)
+
+**Badges** (one-time achievements, stored as array in user record or separate table):
+- "First Blood" — first trade
+- "Diamond Hands" — held any asset 30+ days without selling
+- "P2P Pro" — 50 P2P orders completed
+- "Verified" — KYC done
+- "Referral King" — 10 verified referrals
+- "Whale" — single trade over $1000
+
+**Leaderboard**
+- Weekly and all-time leaderboards by XP.
+- Show top 100. Show the current user's rank even if outside top 100.
+- `GET /api/v1/gamify/leaderboard?period=weekly|alltime`
+- Publicly visible (no auth required) but user display names only, no balances.
+
+**Rewards redemption**
+- Platinum+ users: 10% fee discount on trades.
+- Gold+ users: priority P2P ad placement.
+- Silver+ users: access to early feature previews.
+- Rewards applied server-side when processing orders — check user level before calculating fee.
+
+### Database
+New tables: `user_xp_events` (uid, event_type, xp_awarded, reference_id, created_at), `user_badges` (uid, badge_id, awarded_at), `user_levels` view (derived from sum of xp_events).
+New migration: `017_gamification.sql`
+
+### UI
+- `app/(app)/rewards/page.tsx` already exists — fill it with: XP progress bar to next level, badge showcase, leaderboard tab, referral stats.
+- Home page: small level badge next to username in top bar.
+- After completing a trade or P2P order: confetti + XP popup (component `components/shared/Confetti.tsx` already exists).
+- `GET /api/v1/gamify/me` — returns { level, xp, xp_to_next, badges, rank_weekly, rank_alltime }
+
+### Start command
+```
+I am Claude GAMIFY. I will read CLAUDE.md, then app/(app)/rewards/page.tsx, server/routes/rewards.ts, components/shared/Confetti.tsx. My job is to build the XP system, badges, levels, leaderboard, and fee discounts. Starting with migration 017_gamification.sql then the XP award service.
+```
+
+---
+
+## SENTINEL — Agent Brief (Claude SENTINEL)
+
+You are **Claude SENTINEL**. Your job is to build the AML (anti-money laundering) detection, blockchain address screening, and behavioral risk scoring system.
+
+This is one of the most important parts of the platform legally. Build it carefully. Every decision must be logged and auditable.
+
+### 1. Blockchain address screening
+
+**On-chain address blocklist**
+- Integrate with a free/open sanctions list. Use OFAC SDN list (US Treasury, free) and Chainalysis free community API if available, or maintain an internal blocklist seeded from public sources.
+- `blocked_addresses` table: address (TEXT, indexed), chain, source (e.g. 'OFAC', 'internal', 'chainalysis'), risk_level ('sanctions'|'high_risk'|'darknet'|'mixer'), added_at, notes.
+- On every crypto deposit scan: before crediting, check the sending address against `blocked_addresses`. If match: hold funds, flag transaction, notify admin, do NOT credit user.
+- On every crypto withdrawal: check destination address. If sanctioned: block and notify compliance.
+- `POST /admin/blocked-addresses` — admin can add addresses manually.
+- `GET /admin/blocked-addresses` — admin can list and search.
+
+**Address risk check service**
+- `server/services/addressScreening.ts`
+- `checkAddress(address: string, chain: string): Promise<{ blocked: boolean; riskLevel: string | null; source: string | null }>`
+- Called by deposit scanner and withdrawal handler before every transaction.
+
+### 2. Behavioral risk scoring
+
+**Risk score model** — runs nightly via cron, scores every active user 0–100 (higher = more suspicious):
+
+| Signal | Score contribution |
+|---|---|
+| Deposit → withdrawal within 10 minutes | +25 |
+| Deposit → withdrawal within 1 hour | +10 |
+| More than 5 different destination addresses in 7 days | +15 |
+| P2P order cancelled >50% of the time | +10 |
+| Multiple accounts from same IP (detected at login) | +20 |
+| Large round-number transactions (e.g. exactly $1000, $5000) | +5 |
+| Transaction velocity spike (3x normal volume in 24h) | +15 |
+| New account, KYC not done, high volume | +20 |
+| Account older than 90 days, KYC verified, consistent history | -20 |
+| P2P completion rate >95% | -10 |
+| Referred by trusted user (Gold+) | -5 |
+
+Store daily: `aml_risk_scores` table — uid, score, signals_triggered (JSONB array), scored_at, manual_override, override_by_uid, override_reason.
+
+**Thresholds and actions** (automatic, logged):
+- Score 0–30: normal, no action.
+- Score 31–60: "review" flag — added to admin review queue, no user impact.
+- Score 61–80: "restricted" — withdrawals above $200 require admin approval. User is NOT told why.
+- Score 81–100: "suspended" — account suspended, funds frozen, admin notified immediately.
+
+All automatic actions are logged in `compliance_actions` table with reason, score, signals, timestamp. This is your audit trail.
+
+**Manual override**: admin can set a manual score override and reason. Override takes precedence over the model score.
+
+### 3. Transaction monitoring cron
+
+New cron job: `POST /api/v1/cron/aml-scan` (runs every 15 minutes, protected by CRON_SECRET).
+- Detects rapid deposit-withdrawal patterns.
+- Detects structuring (multiple transactions just below KYC thresholds).
+- Detects unusual P2P patterns (same two users trading repeatedly in short time).
+- Any detection creates a `compliance_alerts` record and notifies admin via email.
+
+### 4. Admin compliance dashboard
+
+Extend `/admin/transactions` to show:
+- Risk score badge on each user row.
+- Filter: show only "review" or "suspended" users.
+- One-click: view full signal breakdown for a user.
+- One-click: escalate, clear, or suspend.
+
+### 5. Suspicious activity reports (SARs)
+
+- `compliance_reports` table: uid, type ('SAR'|'CTR'), description, created_by_uid, submitted_at, reference_number.
+- `POST /admin/compliance/sar` — admin can file a SAR manually.
+- This is required by the Kenya VASP Act for any transaction that triggers suspicion.
+
+### New migrations
+`018_aml_screening.sql` — blocked_addresses, aml_risk_scores, compliance_actions, compliance_alerts, compliance_reports tables with proper RLS (admin-only access, no user access ever).
+
+### Start command
+```
+I am Claude SENTINEL. I will read CLAUDE.md, then server/jobs/anomaly.ts (existing detection), server/services/blockchain.ts, supabase/migrations/. My job is to build AML detection, address screening, behavioral risk scoring, and the compliance dashboard. Starting with migration 018_aml_screening.sql then the address screening service.
+```
+
+---
+
+## Updated Task Board (Wave 2)
+
+| Agent | Task | Priority |
+|---|---|---|
+| Claude GLOBAL | Internationalization — remove KES hardcoding, multi-currency forex, payment provider registry | HIGH |
+| Claude P2P | P2P v2 — escrow, reputation, chat, disputes, multi-currency | HIGH |
+| Claude GAMIFY | Gamification — XP, levels, badges, leaderboard, fee discounts | MEDIUM |
+| Claude SENTINEL | AML — address screening, behavioral scoring, compliance dashboard, SARs | CRITICAL |
