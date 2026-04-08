@@ -150,9 +150,12 @@ export interface Database {
           amount_kes: string;
           usdt_credited: string | null;
           kes_per_usd: string | null;
-          status: "pending" | "processing" | "completed" | "failed" | "cancelled";
+          status: "pending" | "processing" | "completing" | "completed" | "failed" | "cancelled";
           checkout_request_id: string | null;
           mpesa_code: string | null;
+          chain_id: number | null;
+          chain_name: string | null;
+          updated_at: string | null;
           created_at: string;
           completed_at: string | null;
         };
@@ -163,18 +166,24 @@ export interface Database {
           amount_kes: string;
           usdt_credited?: string | null;
           kes_per_usd?: string | null;
-          status?: "pending" | "processing" | "completed" | "failed" | "cancelled";
+          status?: "pending" | "processing" | "completing" | "completed" | "failed" | "cancelled";
           checkout_request_id?: string | null;
           mpesa_code?: string | null;
+          chain_id?: number | null;
+          chain_name?: string | null;
+          updated_at?: string | null;
           created_at?: string;
           completed_at?: string | null;
         };
         Update: {
           usdt_credited?: string | null;
           kes_per_usd?: string | null;
-          status?: "pending" | "processing" | "completed" | "failed" | "cancelled";
+          status?: "pending" | "processing" | "completing" | "completed" | "failed" | "cancelled";
           checkout_request_id?: string | null;
           mpesa_code?: string | null;
+          chain_id?: number | null;
+          chain_name?: string | null;
+          updated_at?: string | null;
           completed_at?: string | null;
         };
       };
@@ -667,6 +676,34 @@ export interface Database {
         };
         Update: {
           label?: string;
+        };
+      };
+      referrals: {
+        Row: {
+          id: string;
+          referrer_uid: string;
+          referee_uid: string;
+          referral_code: string | null;
+          commission_rate: string;
+          rebate_rate: string;
+          total_earned_usdt: string;
+          claimed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          referrer_uid: string;
+          referee_uid: string;
+          referral_code?: string | null;
+          commission_rate?: number;
+          rebate_rate?: number;
+          total_earned_usdt?: number;
+          claimed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          total_earned_usdt?: number;
+          claimed_at?: string | null;
         };
       };
       non_evm_chains: {

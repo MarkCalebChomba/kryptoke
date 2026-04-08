@@ -36,6 +36,7 @@ interface NotificationRow {
   title: string;
   body: string;
   read: boolean;
+  data: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -82,7 +83,7 @@ export function useRealtimeBalances() {
     const balanceChannel = supabase
       .channel(`balances:${uid}`)
       .on(
-        // @ts-expect-error — overloaded union
+        // @ts-ignore — Supabase Realtime overloaded union typings
         "postgres_changes",
         {
           event: "UPDATE",
@@ -98,6 +99,7 @@ export function useRealtimeBalances() {
             setBalance(row.asset, {
               asset: row.asset,
               amount: row.amount,
+              account: row.account as "funding" | "trading" | "earn",
               updatedAt: row.updated_at,
             });
           }
@@ -121,7 +123,7 @@ export function useRealtimeBalances() {
     const notifChannel = supabase
       .channel(`notifications:${uid}`)
       .on(
-        // @ts-expect-error — overloaded union
+        // @ts-ignore — Supabase Realtime overloaded union typings
         "postgres_changes",
         {
           event: "INSERT",
@@ -133,10 +135,12 @@ export function useRealtimeBalances() {
           const row = payload.new;
           addNotification({
             id: row.id,
+            uid: row.uid,
             type: row.type as never,
             title: row.title,
             body: row.body,
             read: row.read,
+            data: (row.data as Record<string, unknown>) ?? {},
             createdAt: row.created_at,
           });
         }
