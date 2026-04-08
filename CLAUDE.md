@@ -336,7 +336,38 @@ Update this section when you complete or start a task. Format:
 [SHIELD] [2026-04-08] Task 13 DONE — useRealtimeBalances hook: subscribes to balances+notifications tables via Supabase Realtime, updates Zustand store live. useSupabaseSession injects custom JWT into Supabase browser client. Both wired into AppLayout via AuthenticatedShell.
 
 # PULSE STATUS
-(no updates yet)
+[PULSE] 2026-04-08 Task 10 DONE — Login/Signup UX fixes applied.
+  Fixes:
+  1. app/auth/login/page.tsx — router.replace("/") → router.replace("/trade") post-login
+  2. app/auth/login/page.tsx — general error banner clears on next keystroke (email/password onChange)
+  3. app/auth/register/page.tsx — optional referral code field added (auto-uppercase, wired to POST /auth/register)
+  4. server/routes/auth.ts — registerSchema accepts optional referralCode; fire-and-forget referral DB insert
+     after user creation (looks up referrer by referral_code, inserts into referrals table)
+
+[PULSE] 2026-04-08 Task 11 DONE — Email notifications via Resend fully wired.
+  Events emailing: deposit_confirmed, withdrawal_initiated, withdrawal_sent, withdrawal_completed (crypto),
+  new_device_login, large_trade (>$100), security_alert.
+  server/services/notifications.ts — all Notifications.* methods now async; each fetches user contact
+  (email, phone, notification_email pref) and calls sendEmail() after the in-app DB insert.
+  sendEmail() exported for direct use. Mobile-friendly dark HTML templates, no heavy CSS frameworks.
+  server/routes/notifications.ts — POST /admin/notifications/send added (adminMiddleware protected):
+  accepts { uid, channel: email|sms|both, subject?, message }, looks up user contact, dispatches.
+
+[PULSE] 2026-04-08 Task 12 DONE — SMS notifications via Africa's Talking wired.
+  Events sending SMS: deposit_confirmed, withdrawal_sent (M-Pesa B2C complete).
+  sendSms() in notifications.ts enforces 160-char limit, handles E.164 normalization,
+  respects AFRICASTALKING_SENDER_ID env var (omitted for sandbox).
+  User opt-out respected via notification_sms column (defaults true if column absent).
+  server/routes/auth.ts — login handler now detects new-device logins (IP not seen before)
+  and fires Notifications.newDeviceLogin() with email alert (fire-and-forget, non-fatal).
+
+  PREREQS for all tasks:
+  - RESEND_API_KEY must be set in Vercel (already confirmed set)
+  - RESEND_FROM_EMAIL should be set (defaults to noreply@kryptoke.com)
+  - AFRICASTALKING_USERNAME + AFRICASTALKING_API_KEY must be set in Vercel
+  - Optional: AFRICASTALKING_SENDER_ID (pre-approved with AT before adding)
+  - Optional: add notification_email BOOLEAN DEFAULT true and notification_sms BOOLEAN DEFAULT true
+    columns to users table — notifications gracefully default to ON if columns missing
 ```
 
 ---
