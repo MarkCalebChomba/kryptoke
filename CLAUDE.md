@@ -402,6 +402,17 @@ Update this section when you complete or start a task. Format:
 [SHIELD] [2026-04-08] Task 13 DONE — useRealtimeBalances hook: subscribes to balances+notifications tables via Supabase Realtime, updates Zustand store live. useSupabaseSession injects custom JWT into Supabase browser client. Both wired into AppLayout via AuthenticatedShell.
 [SHIELD] [2026-04-08] Known Issue #5 DONE — Extracted P2PSheet into components/home/P2PSheet.tsx. Added Send quick action to home page (replaced duplicate Convert shortcut). Users can send USDT/KES directly from home screen.
 [SHIELD] [2026-04-08] Known Issue #1 DONE — JWT revocation implemented. verifyJwt() checks Redis blocklist on every auth. revokeJwt() export for incident response. POST /logout now kills token immediately. To revoke the exposed HAR token: call revokeJwt(token) from any server context.
+[SHIELD] [2026-04-08] S-A DONE — Financial RLS lockdown (migration 019_rls_lockdown.sql).
+  balances was FOR ALL — now SELECT only. All financial tables read-only for clients.
+  withdrawal_whitelist/notifications/kyc/alerts have appropriate write policies.
+  Realtime publication confirmed for balances, deposits, withdrawals, notifications.
+[SHIELD] [2026-04-08] S-B DONE — AML behavioral scoring (migration 020_aml_scores.sql).
+  server/jobs/anomaly.ts: full rewrite — 10 signals, auto-suspend at score>=81, admin alerts.
+  app/api/v1/cron/aml-score/route.ts: CRON_SECRET protected endpoint, register every 4h.
+  server/routes/withdraw.ts: AML check on both /kes and /crypto before queuing.
+  app/admin/compliance/page.tsx + 5 admin API endpoints: full compliance dashboard.
+  lib/supabase/types.ts: added compliance_alerts, aml_risk_scores, compliance_actions, blocked_addresses.
+  PENDING: Apply migrations 019 then 020 to Supabase. Register cron. Set CRON_SECRET in Vercel.
 
 # PULSE STATUS
 [PULSE] 2026-04-08 Task 10 DONE — Login/Signup UX fixes applied.
