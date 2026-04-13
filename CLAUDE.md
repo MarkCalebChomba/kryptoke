@@ -901,3 +901,240 @@ Three tabs: Browse | My Orders | My Ads.
 | PULSE | P-B | P2P UX — escrow UI, in-order chat, reputation, dispute sheet | HIGH | P2P backend |
 
 Do S-A and N-B first. They protect real money.
+
+---
+
+## WAVE 3 — PM Review & New Tasks (2026-04-08)
+
+### Status from review
+
+| Agent | Wave 2 | Notes |
+|---|---|---|
+| NEXUS | N-A ✅ N-B ✅ | Complete |
+| SHIELD | S-A ✅ S-B ✅ | Complete |
+| FORGE | F-A ❌ F-B ❌ F-C ❌ | Not started — migrations 016/017 absent |
+| PULSE | P-A ❌ P-B ❌ | Not started — unblocked, begin now |
+
+---
+
+### NEXUS — Wave 3 Tasks
+
+#### N-C: Fix Rewards Route — CRITICAL (do immediately)
+
+File: `server/routes/rewards.ts`
+
+**Problem 1 — real USDT being credited with no budget cap.**
+The `daily_login` reward (0.05 USDT) has zero 24-hour enforcement. A user can call `POST /rewards/claim/daily_login` repeatedly and drain unlimited USDT. All task rewards credit real balances with no total pool limit.
+
+**Fix:**
+1. Add per-user daily claim guard on `daily_login`: check `ledger_entries` for a `reward:daily_login` entry in the last 24 hours. If found, return 400 "Already claimed today."
+2. Add a global rewards budget in `system_config`: key `rewards_enabled` (boolean, default false) and `rewards_budget_remaining_usdt` (numeric). Before any claim, check `rewards_enabled = true` and `rewards_budget_remaining_usdt >= task.reward`. Deduct from budget on each successful claim.
+3. Until `rewards_enabled` is set to true by admin, all `/rewards/claim/*` endpoints return 400 "Rewards currently paused."
+
+**Problem 2 — rewards should be XP not real money by default.**
+The task completion rewards should award XP (once FORGE builds gamification). Keep the USDT reward structure in the data model but set all amounts to "0" until the admin explicitly funds the rewards pool and enables it.
+
+#### N-D: Airdrop System
+
+New endpoint: `POST /admin/airdrop` (adminMiddleware required)
+
+Request body:
+```ts
+{
+  amount_per_user: string        // USDT per recipient
+  asset: string                  // default "USDT"
+  segment: "all" | "kyc_verified" | "level_gold_plus" | "country" | "single"
+  country_code?: string          // if segment = "country"
+  uid?: string                   // if segment = "single"
+  note: string                   // admin note for audit trail
+}
+```
+
+Logic:
+1. Query recipient UIDs based on segment.
+2. Check `system_config` key `airdrop_budget_remaining_usdt` >= (amount_per_user × recipient_count). If not, reject.
+3. For each recipient: `upsertBalance` + `createLedgerEntry` with type `airdrop` + notify via `Notifications.inApp`.
+4. Deduct total from `airdrop_budget_remaining_usdt`.
+5. Insert into `airdrops` table: id, segment, amount_per_user, asset, recipient_count, total_amount, note, created_by_uid, created_at.
+
+New migration `021_airdrops.sql`:
+```sql
+CREATE TABLE airdrops (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  segment TEXT NOT NULL,
+  amount_per_user NUMERIC NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'USDT',
+  recipient_count INT NOT NULL,
+  total_amount NUMERIC NOT NULL,
+  note TEXT,
+  created_by_uid UUID REFERENCES users(uid),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+-- Admin only. No user RLS.
+ALTER TABLE airdrops ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "admin_only" ON airdrops USING (false);
+```
+
+Admin UI: add "Airdrop" button on `/admin/dashboard` that opens a form with the fields above. Show total cost before confirming. Show history of past airdrops.
+
+---
+
+### FORGE — Wave 3 Tasks
+
+#### F-A: Home Page Token List (carry over — do first)
+
+Already specified in Wave 2. Build now. Top 50 tokens in a vertical list below the horizontal coin tiles strip on `app/(app)/page.tsx`. Tap → `/markets/[symbol]`.
+
+#### F-B: Token List to 200 (carry over)
+
+Already specified in Wave 2. Expand price cron, market page pagination.
+
+#### F-C: Gamification (carry over — migration 017 is missing, create it)
+
+Already specified in Wave 2. Create migration 017, build `server/services/gamify.ts`, wire XP into all call sites, build rewards page UI.
+
+#### F-D: Futures Overhaul — CRITICAL UX
+
+The current futures tab is not usable as a real trading interface. Full rebuild required.
+
+**Step 1 — new market data endpoint**
+
+`GET /api/v1/futures/market-data?symbol=BTC`
+
+Fetch from Binance Futures public API (no key needed):
+- Mark price: `GET https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT`
+  Returns: `markPrice`, `indexPrice`, `lastFundingRate`, `nextFundingTime`
+- Open interest: `GET https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT`
+- 24h stats: `GET https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT`
+
+Cache in Redis with key `futures:market:{symbol}` TTL 5 seconds. Return combined object:
+```ts
+{
+  markPrice: string
+  indexPrice: string
+  fundingRate: string          // e.g. "0.0001" = 0.01%
+  fundingCountdownSeconds: number
+  openInterest: string         // in coin units
+  volume24h: string            // USDT
+  change24h: string            // percent
+}
+```
+
+**Step 2 — rebuild `components/trade/FuturesTab.tsx`**
+
+Layout (top to bottom on mobile):
+
+```
+┌─────────────────────────────────────┐
+│ BTC/USDT Perp    [Isolated ⇄ Cross] │  ← pair + margin mode toggle
+│ $94,200  Mark                        │
+│ $94,180  Index   0.01% in 4h 23m    │  ← funding rate + countdown
+│ 24h: +2.4%  OI: 48,240 BTC          │
+├─────────────────────────────────────┤
+│ [Market]  [Limit]  [TP/SL Order]    │  ← order type tabs
+├─────────────────────────────────────┤
+│ [  ▲ Long  ]  [  ▼ Short  ]         │  ← side toggle
+├─────────────────────────────────────┤
+│ Leverage  ────●──────  20×  [edit]  │  ← slider + tap to type custom
+│ ⚠ Liq ~$89,234  (cross)             │  ← live liquidation preview
+├─────────────────────────────────────┤
+│ Amount  [_______ USDT] [_______ BTC]│  ← dual input, sync on change
+│ [25%] [50%] [75%] [100%]            │  ← percent of available balance
+├─────────────────────────────────────┤
+│ TP [$_______]    SL [$_______]      │  ← always visible
+├─────────────────────────────────────┤
+│ [     Open Long  +2.4% est.     ]   │  ← colored confirm button
+│ Avail: 248.50 USDT  Fee: 0.04 USDT  │
+└─────────────────────────────────────┘
+```
+
+Below the form — positions panel (NOT inline, use a bottom drawer):
+- "Positions (2)" button at bottom of screen opens a `BottomSheet`
+- Inside sheet: tabs — Positions | Open Orders | History
+- Each position card shows: pair, Long/Short badge, leverage, entry, mark, liq price, margin, unrealised PnL (live, updating every 5s), ROE%
+- Each card has: "Close" button (full close) + "Partial" button (opens input for partial size) + "Edit TP/SL" button
+
+**Liquidation price formulas** (correct, not simplified):
+
+Isolated Long: `liqPrice = entryPrice × (1 - 1/leverage + maintenanceMarginRate)`
+Isolated Short: `liqPrice = entryPrice × (1 + 1/leverage - maintenanceMarginRate)`
+Cross Long: accounts for total available balance — more complex, show "varies" for now
+Cross Short: same
+
+Use `maintenanceMarginRate = 0.004` (0.4%) for BTC, `0.005` for others — Binance standard tiers.
+
+**Order types:**
+- Market: executes at mark price immediately
+- Limit: stores as `pending_limit` status, fills when mark price crosses limit price (check in the AML/price cron or add a separate limit order monitor cron)
+- TP/SL Order: sets a conditional order that triggers at a price — store in `futures_orders` table
+
+**Margin mode toggle:**
+- Isolated: only the margin posted can be lost
+- Cross: entire trading balance is collateral (much higher risk, wider liquidation buffer)
+- Show a clear tooltip/warning when switching to Cross
+
+**Risk warning** — show once per session (localStorage flag): "Futures trading involves significant risk of loss. Never trade more than you can afford to lose."
+
+---
+
+### SHIELD — Wave 3 Tasks
+
+#### S-C: Fix Duplicate Migration Numbers
+
+Migrations `012_deposit_completing_status.sql` and `012_rls_custom_jwt.sql` share the same number prefix. Same for `013_referrals_and_referral_code.sql` and `013_withdrawal_timed_out_and_evm_scanner.sql`.
+
+Fix: rename files to use sequential numbering without gaps:
+```
+012_deposit_completing_status.sql    → keep as 012
+012_rls_custom_jwt.sql               → rename to 012b_rls_custom_jwt.sql
+013_referrals_and_referral_code.sql  → keep as 013
+013_withdrawal_timed_out_and_evm_scanner.sql → rename to 013b_withdrawal_timed_out.sql
+```
+Create a `supabase/migrations/README.md` explaining that migrations must be run in filename order and duplicate prefix files (12b, 13b) should be run after their base number.
+
+#### S-D: Futures RLS Fix
+
+The `futures_positions` and `futures_orders` tables in migration 007 use the old `auth.uid()` pattern which does not work with the custom JWT. Update their policies to use `get_app_uid()` in a new migration `022_futures_rls_fix.sql`:
+
+```sql
+-- futures_positions
+DROP POLICY IF EXISTS "Users read own futures" ON futures_positions;
+CREATE POLICY "futures_read_own" ON futures_positions
+  FOR SELECT USING (get_app_uid() = uid);
+
+-- futures_orders
+DROP POLICY IF EXISTS "Users read own futures_orders" ON futures_orders;
+CREATE POLICY "futures_orders_read_own" ON futures_orders
+  FOR SELECT USING (get_app_uid() = uid);
+```
+
+---
+
+### PULSE — Wave 3 Tasks
+
+#### P-A: International UX (carry over — NEXUS N-A is done, unblocked)
+
+Already specified in Wave 2. Country selector on register, `lib/utils/currency.ts`, replace KSh hardcoding, deposit/withdraw pages show payment methods from `/config/payment-methods?country=`.
+
+#### P-B: P2P UX (carry over)
+
+Already specified in Wave 2. Escrow UI, in-order chat, reputation display, dispute sheet, three-tab layout.
+
+#### P-C: Airdrop Notification UX
+
+When a user receives an airdrop (new `airdrop` type ledger entry), show a special notification. In `components/shared/ToastContainer.tsx` or wherever notifications are displayed: airdrop notifications get a distinct style — yellow/gold banner, confetti trigger, message "You received an airdrop of X USDT from KryptoKe."
+
+Subscribe to the `notifications` table via Supabase Realtime (already wired in `useRealtimeBalances`) — when a new notification arrives with type `airdrop`, trigger the special toast + Confetti.
+
+---
+
+## Wave 3 Priority Order
+
+1. NEXUS: N-C immediately (rewards route is a live financial risk)
+2. SHIELD: S-C immediately (duplicate migrations block DB setup for new deployments)
+3. SHIELD: S-D (futures RLS broken since migration 012)
+4. FORGE: F-D (futures overhaul — UX is blocking real traders from using it)
+5. FORGE: F-A, F-C (home token list + gamification — these unblock PULSE)
+6. NEXUS: N-D (airdrop system)
+7. PULSE: P-A, P-B (international UX + P2P UI)
+8. PULSE: P-C (airdrop notification UX — depends on N-D)
