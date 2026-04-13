@@ -548,7 +548,34 @@ Update this section when you complete or start a task. Format:
 
   supabase/migrations/016_p2p_messages.sql:
   * p2p_messages table with RLS (get_app_uid() party check) + Realtime publication
-```
+
+[PULSE] 2026-04-13 Task 14 DONE — Onboarding wizard.
+  supabase/migrations/017_users_onboarded_at.sql — onboarded_at TIMESTAMPTZ DEFAULT NULL on users
+  lib/supabase/types.ts + types/index.ts — onboarded_at/onboardedAt on Row/Insert/Update/User
+  server/routes/auth.ts — POST /auth/onboarding-complete sets timestamp; toApiUser maps it
+  components/onboarding/OnboardingWizard.tsx — 3-step full-screen wizard:
+    Step 1: Deposit KES (M-Pesa explainer + CTA → /deposit)
+    Step 2: Buy crypto (coin strip + CTA → /trade)
+    Step 3: Set up PIN (security explainer + CTA → /account/security)
+    "Skip all" button in header; each step has individual skip; calls POST /auth/onboarding-complete on finish
+  app/auth/register/page.tsx — wizard shown after success screen ("Go to KryptoKe")
+  app/(app)/layout.tsx — AuthenticatedShell checks user.onboardedAt === null and shows wizard
+    for any authenticated user who hasn't completed it; local onboardingDone flag prevents re-show
+
+[PULSE] 2026-04-13 Task 15 DONE — Support AI.
+  server/routes/support.ts — added:
+    POST /support/chat — conversational Claude AI with user context (KYC status, recent tickets,
+      country); history array for multi-turn; graceful fallback on API error; rate limited
+    POST /support/ai-suggest — AI drafts a full ticket description from a one-liner brief
+    Uses fetch() to api.anthropic.com/v1/messages — no SDK dep, requires ANTHROPIC_API_KEY in Vercel
+  app/(app)/support/page.tsx — full support page:
+    AI Chat tab: bubble UI, typing indicator, 6 quick-topic chips (shown until first message),
+      Enter to send, "Raise ticket" CTA at bottom, last 10 messages sent as history
+    My Tickets tab: New Ticket button, ticket cards with status badges + staff response display
+    RaiseTicketSheet: type selector, subject, brief → ✨ AI expand button (POST /ai-suggest),
+      full description textarea, submit (POST /tickets), success confirmation screen
+
+  PREREQ: ANTHROPIC_API_KEY must be set in Vercel env vars```
 
 ---
 
