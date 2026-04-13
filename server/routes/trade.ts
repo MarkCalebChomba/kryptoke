@@ -8,10 +8,20 @@ import { getBalance, upsertBalance, createLedgerEntry } from "@/server/db/balanc
 import { Notifications } from "@/server/services/notifications";
 import { getBestSpotPrice, routeSpotOrder } from "@/server/services/exchange";
 import { getKesPerUsd } from "@/server/services/forex";
+import { awardXp, getUserLevel } from "@/server/services/gamify";
 import { subtract, add } from "@/lib/utils/money";
 import Big from "big.js";
 
 const trade = new Hono();
+
+// Safe level fetch — never throws, returns zero discount on failure
+async function getActiveLevel(uid: string) {
+  try {
+    return await getUserLevel(uid);
+  } catch {
+    return { level: "Bronze", totalXp: 0, xpToNext: 500, feeDiscount: 0 };
+  }
+}
 
 // ─── Shared helper — get spot price with KES equivalent ──────────────────
 
@@ -48,13 +58,16 @@ trade.post(
     const side: "buy" | "sell" = tokenIn === "USDT" || tokenIn === "KES" ? "buy" : "sell";
 
     try {
-      const [{ price: usdPrice, exchange }, kesPerUsd] = await Promise.all([
+      const [{ price: usdPrice, exchange }, kesPerUsd, userLevel] = await Promise.all([
         getBestSpotPrice(baseAsset),
         getKesPerUsd(),
+        getActiveLevel(c.get("user").uid),
       ]);
 
       const kesPrice = new Big(usdPrice).times(kesPerUsd).toFixed(2);
-      const SPREAD = 0.003; // 0.3% KryptoKe spread on spot
+      const BASE_SPREAD = 0.003; // 0.3%
+      // Platinum/Diamond get 10% fee discount
+      const SPREAD = BASE_SPREAD * (1 - userLevel.feeDiscount);
       const feeRate = side === "buy" ? (1 + SPREAD) : (1 - SPREAD);
 
       let toAmount: string;
@@ -133,13 +146,15 @@ trade.post(
     const baseAsset = side === "buy" ? tokenOut : tokenIn;
     let currentPrice = "0";
     let kesPerUsd = "130";
+    let feeDiscount = 0;
     try {
-      const p = await getPriceWithKes(baseAsset);
+      const [p, lvl] = await Promise.all([getPriceWithKes(baseAsset), getActiveLevel(uid)]);
       currentPrice = p.usdPrice;
       kesPerUsd = p.kesPerUsd;
+      feeDiscount = lvl.feeDiscount;
     } catch { /* use fallback */ }
 
-    const SPREAD = 0.003;
+    const SPREAD = 0.003 * (1 - feeDiscount);
     const effectivePrice = side === "buy"
       ? new Big(currentPrice).times(1 + SPREAD).toFixed(8)
       : new Big(currentPrice).times(1 - SPREAD).toFixed(8);
@@ -256,6 +271,9 @@ trade.post(
         tradeRecord.id
       ).catch(() => undefined);
     }
+
+    // XP — fire-and-forget
+    awardXp(uid, "trade_completed", 10, tradeRecord.id).catch(() => undefined);
 
     return c.json({
       success: true,

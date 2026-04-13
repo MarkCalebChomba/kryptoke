@@ -8,6 +8,7 @@ import { getBalance, upsertBalance, createLedgerEntry } from "@/server/db/balanc
 import { redis } from "@/lib/redis/client";
 import { add, subtract, lt } from "@/lib/utils/money";
 import Big from "big.js";
+import { awardXp } from "@/server/services/gamify";
 
 const p2p = new Hono();
 p2p.use("*", withApiRateLimit());
@@ -232,6 +233,10 @@ p2p.post("/orders/:id/release", authMiddleware, async (c) => {
     const newAmt = Math.max(0, parseFloat(adRow.available_amount.toString()) - parseFloat(order.crypto_amount.toString()));
     await db.from("p2p_ads").update({ available_amount: newAmt }).eq("id", order.ad_id);
   }
+
+  // XP — fire-and-forget
+  awardXp(order.seller_uid, "p2p_seller", 25, id).catch(() => undefined);
+  awardXp(order.buyer_uid,  "p2p_buyer",  15, id).catch(() => undefined);
 
   return c.json({ success: true, message: "Crypto released to buyer successfully." });
 });

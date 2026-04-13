@@ -94,11 +94,20 @@ const TABS: MarketTab[] = ["Hot", "Favorites", "New", "Gainers"];
 // Top coins to always show
 const MAJOR_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "TRXUSDT"];
 
+const LIST_PAGE_SIZE = 50;
+
 export function MarketList({ data, isLoading, onSeeAll, onCoinClick }: MarketListProps) {
   const [activeTab, setActiveTab] = useState<MarketTab>("Hot");
   const [showChange, setShowChange] = useState<"1h" | "24h">("24h");
+  const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
   const { prices, priceChanges, priceChanges1h, volumes } = usePrices();
   const { isFavorite } = usePreferences();
+
+  // Reset visible count on tab change
+  const handleTabChange = (tab: MarketTab) => {
+    setActiveTab(tab);
+    setVisibleCount(LIST_PAGE_SIZE);
+  };
 
   // Enrich DB tokens with live data
   const enriched = data.map((coin) => {
@@ -137,7 +146,10 @@ export function MarketList({ data, isLoading, onSeeAll, onCoinClick }: MarketLis
       case "Gainers": return [...allCoins].sort((a, b) => parseFloat(b.change) - parseFloat(a.change));
       default: return allCoins;
     }
-  })().slice(0, 20);
+  })();
+
+  const visible = filtered.slice(0, visibleCount);
+  const hasMore = filtered.length > visibleCount;
 
   return (
     <div>
@@ -164,7 +176,7 @@ export function MarketList({ data, isLoading, onSeeAll, onCoinClick }: MarketLis
       {/* Tabs */}
       <div className="flex gap-1 px-4 mb-1 overflow-x-auto no-scrollbar">
         {TABS.map((tab) => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
+          <button key={tab} onClick={() => handleTabChange(tab)}
             className={cn("flex-shrink-0 px-3 py-1.5 rounded-lg font-outfit text-xs font-medium transition-all",
               activeTab === tab ? "bg-primary/10 text-primary border border-primary/20" : "text-text-muted")}>
             {tab}
@@ -182,9 +194,9 @@ export function MarketList({ data, isLoading, onSeeAll, onCoinClick }: MarketLis
       {/* Rows */}
       {isLoading
         ? Array.from({ length: 5 }).map((_, i) => <SkeletonCoinRow key={i} />)
-        : filtered.length === 0
+        : visible.length === 0
           ? <div className="py-8 text-center"><p className="text-text-muted font-outfit text-sm">No coins found</p></div>
-          : filtered.map((coin) => (
+          : visible.map((coin) => (
               <CoinRow key={coin.address} {...coin}
                 change24h={coin.change}
                 change1h={(coin as { change1h?: string }).change1h ?? "0"}
@@ -192,6 +204,15 @@ export function MarketList({ data, isLoading, onSeeAll, onCoinClick }: MarketLis
                 isFavorite={isFavorite(coin.address)}
                 onClick={() => onCoinClick(coin.address, coin.symbol)} />
             ))}
+
+      {/* Load more */}
+      {hasMore && !isLoading && (
+        <button
+          onClick={() => setVisibleCount((n) => n + LIST_PAGE_SIZE)}
+          className="w-full py-3 font-outfit text-xs text-primary font-semibold border-t border-border active:bg-bg-surface2 transition-colors">
+          Load more ({filtered.length - visibleCount} remaining)
+        </button>
+      )}
     </div>
   );
 }

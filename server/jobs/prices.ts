@@ -48,28 +48,32 @@ async function fetchCoinGeckoPrices(): Promise<Map<string, {
   volume: string; high: string; low: string;
   name: string; logo_url: string; rank: number;
 }>> {
-  // CoinGecko free API — no key needed, allows server/cloud IPs
-  const res = await fetch(
+  // Fetch top 200 — page 1 (ranks 1-100) + page 2 (ranks 101-200)
+  // CoinGecko free API works from server/cloud IPs
+  const BASE =
     "https://api.coingecko.com/api/v3/coins/markets" +
-    "?vs_currency=usd&order=market_cap_desc&per_page=100&page=1" +
-    "&price_change_percentage=1h%2C24h&sparkline=false",
-    { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20_000) }
-  );
+    "?vs_currency=usd&order=market_cap_desc&per_page=100" +
+    "&price_change_percentage=1h%2C24h&sparkline=false";
 
-  if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+  const [res1, res2] = await Promise.all([
+    fetch(`${BASE}&page=1`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20_000) }),
+    fetch(`${BASE}&page=2`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20_000) })
+      .catch(() => null), // page 2 failure is non-fatal
+  ]);
 
-  const data = (await res.json()) as Array<{
-    symbol: string;
-    name: string;
-    image: string;
-    current_price: number;
-    price_change_percentage_24h: number;
+  if (!res1.ok) throw new Error(`CoinGecko ${res1.status}`);
+
+  type CgCoin = {
+    symbol: string; name: string; image: string;
+    current_price: number; price_change_percentage_24h: number;
     price_change_percentage_1h_in_currency: number;
-    total_volume: number;
-    high_24h: number;
-    low_24h: number;
+    total_volume: number; high_24h: number; low_24h: number;
     market_cap_rank: number;
-  }>;
+  };
+
+  const page1 = (await res1.json()) as CgCoin[];
+  const page2 = res2?.ok ? (await res2.json()) as CgCoin[] : [];
+  const data = [...page1, ...page2];
 
   const map = new Map<string, {
     price: string; change_24h: string; change_1h: string;

@@ -179,6 +179,7 @@ export default function HomePage() {
   const fearGreed   = homeData?.fearGreed ?? null;
   const fgHistory   = homeData?.fgHistory ?? [];
   const overview    = homeData?.overview  ?? null;
+  const marketList  = homeData?.marketList ?? [];
 
   // Live prices from Binance for fallback coins
   const [liveData, setLiveData] = useState<Record<string, { price: string; change: string }>>({});
@@ -353,6 +354,93 @@ export default function HomePage() {
       )}
 
       <div className="h-5" />
+
+      {/* ── All Markets list ─────────────────────────────────────────── */}
+      <div className="mx-4 mb-2 flex items-center justify-between">
+        <h2 className="font-syne font-bold text-sm text-text-primary">All Markets</h2>
+        <button onClick={() => router.push("/markets")}
+          className="font-outfit text-xs text-primary font-medium">See all →</button>
+      </div>
+
+      {homeLoading && marketList.length === 0 ? (
+        <div className="mx-4 space-y-0 border border-border rounded-2xl overflow-hidden">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-3 border-b border-border/40 last:border-0">
+              <div className="skeleton w-8 h-8 rounded-full shrink-0" />
+              <div className="flex-1 space-y-1.5">
+                <div className="skeleton h-3 w-16 rounded" />
+                <div className="skeleton h-2.5 w-24 rounded" />
+              </div>
+              <div className="skeleton h-5 w-10 rounded" />
+              <div className="space-y-1 text-right">
+                <div className="skeleton h-3 w-16 rounded" />
+                <div className="skeleton h-4 w-12 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : marketList.length > 0 ? (
+        <div className="mx-4 border border-border rounded-2xl overflow-hidden">
+          {marketList.map((coin) => {
+            const chg = parseFloat(coin.change_24h) || 0;
+            const isPos = chg > 0;
+            const isNeg = chg < 0;
+            return (
+              <button
+                key={coin.symbol}
+                onClick={() => router.push(`/markets/${coin.symbol}`)}
+                className="w-full flex items-center gap-3 px-3 border-b border-border/40 last:border-0 bg-bg-surface active:bg-bg-surface2 transition-colors"
+                style={{ height: 56 }}
+              >
+                {/* Logo */}
+                <div className="w-8 h-8 rounded-full bg-bg-surface2 border border-border overflow-hidden flex items-center justify-center shrink-0">
+                  {coin.logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={coin.logo_url}
+                      alt={coin.symbol}
+                      width={32}
+                      height={32}
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : (
+                    <span className="font-outfit font-bold text-[10px] text-primary">
+                      {coin.symbol.slice(0, 3)}
+                    </span>
+                  )}
+                </div>
+
+                {/* Name + symbol */}
+                <div className="flex-1 min-w-0 text-left">
+                  <p className="font-outfit font-bold text-[13px] text-text-primary leading-tight">{coin.symbol}</p>
+                  <p className="font-outfit text-[11px] text-text-muted truncate leading-tight">{coin.name}</p>
+                </div>
+
+                {/* Sparkline */}
+                <div className="shrink-0">
+                  <TileSparkline change={coin.change_24h} />
+                </div>
+
+                {/* Price + change */}
+                <div className="text-right shrink-0 min-w-[72px]">
+                  <p className="font-price text-[13px] font-semibold text-text-primary tabular-nums leading-tight">
+                    {parseFloat(coin.price) >= 1
+                      ? `$${parseFloat(coin.price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : `$${parseFloat(coin.price).toPrecision(4)}`}
+                  </p>
+                  <span className={cn(
+                    "inline-block font-price text-[11px] font-semibold px-1.5 py-0.5 rounded tabular-nums mt-0.5",
+                    isPos ? "bg-up/15 text-up" : isNeg ? "bg-down/15 text-down" : "bg-bg-surface2 text-text-muted"
+                  )}>
+                    {isPos ? "+" : ""}{chg.toFixed(2)}%
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* Events calendar */}
       <EventsCalendar />

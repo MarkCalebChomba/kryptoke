@@ -23,11 +23,21 @@ interface HomeCoin {
   change_24h: string;
 }
 
+interface MarketListCoin {
+  symbol:     string;
+  name:       string;
+  logo_url:   string;
+  cmc_rank:   number;
+  price:      string;
+  change_24h: string;
+}
+
 interface HomeData {
   homeCoins:  HomeCoin[];
   fearGreed:  FearGreedData;
   fgHistory:  FearGreedHistoryPoint[];
   overview:   { totalVolume24h: string } | null;
+  marketList: MarketListCoin[];
 }
 
 // ── Fear & Greed (standalone — used on full market analysis page) ─────────────

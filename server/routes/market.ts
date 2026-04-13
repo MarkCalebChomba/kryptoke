@@ -1334,6 +1334,48 @@ market.get("/home", authMiddleware, async (c) => {
     }
   }
 
+  // Top 50 market list — from DB tokens + Redis prices
+  let marketList: Array<{
+    symbol: string; name: string; logo_url: string;
+    cmc_rank: number; price: string; change_24h: string;
+  }> = [];
+
+  try {
+    const { data: tokens } = await db
+      .from("tokens")
+      .select("symbol, name, logo_url, cmc_rank")
+      .eq("is_active", true)
+      .order("cmc_rank", { ascending: true })
+      .limit(50);
+
+    if (tokens && tokens.length > 0) {
+      marketList = tokens.map((t) => {
+        const p = prices[t.symbol];
+        return {
+          symbol:     t.symbol,
+          name:       t.name,
+          logo_url:   t.logo_url ?? "",
+          cmc_rank:   t.cmc_rank ?? 999,
+          price:      p?.price      ?? "0",
+          change_24h: p?.change_24h ?? "0",
+        };
+      });
+    } else if (Object.keys(prices).length > 0) {
+      // DB cold — build from Redis prices blob
+      marketList = Object.entries(prices)
+        .map(([sym, p]) => ({
+          symbol:     sym,
+          name:       (p as { name?: string }).name ?? sym,
+          logo_url:   (p as { logo_url?: string }).logo_url ?? "",
+          cmc_rank:   999,
+          price:      p.price,
+          change_24h: p.change_24h,
+        }))
+        .sort((a, b) => a.cmc_rank - b.cmc_rank)
+        .slice(0, 50);
+    }
+  } catch { /* marketList stays empty */ }
+
   return c.json({
     success: true,
     data: {
@@ -1341,6 +1383,7 @@ market.get("/home", authMiddleware, async (c) => {
       fearGreed:   fearGreed ?? { value: 50, classification: "Neutral", timestamp: null },
       fgHistory:   fgHistory ?? [],
       overview,
+      marketList,
     },
   });
 });

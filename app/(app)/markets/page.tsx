@@ -28,7 +28,8 @@ type SortKey = "volume" | "price" | "change";
 type SortDir = "asc" | "desc";
 
 const TABS: Tab[] = ["All", "Favourites", "Hot", "Gainers", "Losers"];
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;    // rows shown per page ("Load more" adds 50)
+const FETCH_LIMIT = 200; // total to fetch from API per request
 
 const CHAIN_FILTERS = [
   { label: "All Chains", value: "" },
@@ -213,6 +214,7 @@ export default function MarketsPage() {
   const [sortKey,        setSortKey]        = useState<SortKey>("volume");
   const [sortDir,        setSortDir]        = useState<SortDir>("desc");
   const [coins,          setCoins]          = useState<Coin[]>([]);
+  const [allCoinsCache,  setAllCoinsCache]  = useState<Coin[]>([]);
   const [page,           setPage]           = useState(1);
   const [hasMore,        setHasMore]        = useState(true);
   const [loading,        setLoading]        = useState(true);
@@ -265,13 +267,22 @@ export default function MarketsPage() {
     else setLoadingMore(true);
     try {
       const tab = activeTab === "Favourites" ? "all" : activeTab.toLowerCase();
-      const params = new URLSearchParams({ page: String(nextPage), limit: String(PAGE_SIZE), tab });
+      const params = new URLSearchParams({ page: "1", limit: String(FETCH_LIMIT), tab });
       if (chainFilter) params.set("chain", chainFilter);
       if (search)      params.set("search", search);
       const res = await apiGet<Coin[]>(`/market/coins?${params}`);
-      const coins = Array.isArray(res) ? res : (res as unknown as { data: Coin[] }).data ?? [];
-      setCoins((prev) => reset ? coins : [...prev, ...coins]);
-      setHasMore(coins.length === PAGE_SIZE);
+      const all = Array.isArray(res) ? res : (res as unknown as { data: Coin[] }).data ?? [];
+      if (reset) {
+        setAllCoinsCache(all);
+        setCoins(all.slice(0, PAGE_SIZE));
+        setHasMore(all.length > PAGE_SIZE);
+      } else {
+        // Load more — slice from cache
+        const start = (nextPage - 1) * PAGE_SIZE;
+        const slice = allCoinsCache.slice(start, start + PAGE_SIZE);
+        setCoins((prev) => [...prev, ...slice]);
+        setHasMore(start + PAGE_SIZE < allCoinsCache.length);
+      }
     } catch {
       setError(true);
     } finally {
@@ -279,7 +290,7 @@ export default function MarketsPage() {
       setLoadingMore(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, chainFilter, search]);
+  }, [activeTab, chainFilter, search, allCoinsCache]);
 
   // Reset on filter change
   useEffect(() => {

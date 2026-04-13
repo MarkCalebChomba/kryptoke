@@ -12,6 +12,7 @@ import { Notifications } from "@/server/services/notifications";
 import { isValidKenyanPhone } from "@/lib/utils/formatters";
 import { add, divide, toFixed } from "@/lib/utils/money";
 import Big from "big.js";
+import { awardXp, awardBadge } from "@/server/services/gamify";
 
 const mpesa = new Hono();
 
@@ -229,6 +230,22 @@ async function processCallback(body: unknown): Promise<void> {
     mpesa_code: data.mpesaReceiptNumber,
     usdt_credited: usdtToCredit,
   });
+
+  // XP — first_deposit only if this is the user's first ever deposit
+  (async () => {
+    try {
+      const db2 = getDb();
+      const { count } = await db2
+        .from("deposits")
+        .select("*", { count: "exact", head: true })
+        .eq("uid", deposit.uid)
+        .eq("status", "completed");
+      if ((count ?? 0) === 1) {
+        await awardXp(deposit.uid, "first_deposit", 200, deposit.id);
+        await awardBadge(deposit.uid, "first_deposit");
+      }
+    } catch { /* non-fatal */ }
+  })();
 
   await db.from("deposit_reconciliation").insert({
     deposit_id: deposit.id,

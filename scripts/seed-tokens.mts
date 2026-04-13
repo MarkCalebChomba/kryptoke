@@ -1,6 +1,7 @@
 /**
  * ONE-TIME SETUP SCRIPT
  * Run: pnpm seed:tokens
+ * Run once against production with pnpm seed:tokens — all 200 tokens defined here.
  *
  * 1. Creates 'token-logos' bucket in Supabase Storage
  * 2. Downloads logos from CoinGecko → uploads to your Supabase Storage
