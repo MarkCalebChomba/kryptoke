@@ -515,6 +515,39 @@ Update this section when you complete or start a task. Format:
   - Optional: AFRICASTALKING_SENDER_ID (pre-approved with AT before adding)
   - Optional: add notification_email BOOLEAN DEFAULT true and notification_sms BOOLEAN DEFAULT true
     columns to users table — notifications gracefully default to ON if columns missing
+
+[PULSE] 2026-04-13 Task P-A DONE — International UX.
+  1. lib/utils/currency.ts — 40-country map, getCurrencyForCountry(), formatFiat(), COUNTRY_OPTIONS[]
+  2. supabase/migrations/015_users_country_code.sql — country_code TEXT DEFAULT 'KE' on users
+  3. lib/supabase/types.ts + types/index.ts — country_code added to Row/Insert/Update/User
+  4. server/routes/auth.ts — register accepts countryCode, stores to DB; toApiUser maps it;
+     profile PATCH exposes countryCode for user-settings updates
+  5. app/auth/register/page.tsx — country <select> with 40 options (flag + name), defaults KE
+  6. components/home/PortfolioCard.tsx — KSh for KE; USD with local-currency note for non-KE;
+     TODO(NEXUS) comment for when N-A forex rates land
+  7. app/(app)/page.tsx — passes countryCode + kesPerUsd to PortfolioCard
+  8. app/(app)/deposit/page.tsx — calls GET /config/payment-methods?country=XX (silent fallback);
+     shows coming-soon banner + switch-to-crypto CTA for non-KE users
+
+[PULSE] 2026-04-13 Task P-B DONE — P2P UX full rebuild.
+  app/(app)/p2p/page.tsx — complete rewrite with:
+  * Browse tab: Buy/Sell toggle, asset filter (USDT/BTC/ETH), fiat filter (KES/NGN/GHS/USD),
+    payment method filter, ad cards with merchant reputation row
+  * OrderSheet: escrow notice banner, amount input with live crypto equivalent, 30-min countdown
+    timer (urgent red <5min), payment instructions, InOrderChat (Supabase Realtime on
+    p2p_messages), I-have-paid CTA, dispute form (after payment sent, POST /orders/:id/dispute)
+  * ReputationSheet: merchant avatar, stats grid (completion/trades/avg-release), star rating,
+    payment methods, trade terms — opens on tapping merchant name
+  * My Orders tab: status badges, countdown for pending orders, tap to reopen detail+chat
+  * My Ads tab: active/paused toggle switch (POST /ads/:id/pause|activate), Post New Ad button
+  * CreateAdSheet: type/asset/fiat/price/amount/min-max/methods/terms, POST /p2p/ads
+
+  server/routes/p2p.ts:
+  * POST /orders/:id/messages — party-only chat insert
+  * POST /ads/:id/pause + /ads/:id/activate — toggle ad status
+
+  supabase/migrations/016_p2p_messages.sql:
+  * p2p_messages table with RLS (get_app_uid() party check) + Realtime publication
 ```
 
 ---

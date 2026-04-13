@@ -261,4 +261,59 @@ p2p.post(
   }
 );
 
+
+/* ─── POST /orders/:id/messages — Send a chat message ───────────────────── */
+p2p.post(
+  "/orders/:id/messages",
+  authMiddleware,
+  zValidator("json", z.object({ message: z.string().min(1).max(300) })),
+  async (c) => {
+    const uid = c.get("uid") as string;
+    const id  = c.req.param("id");
+    const { message } = c.req.valid("json");
+    const db = getDb();
+
+    // Verify the user is party to this order
+    const { data: order } = await db.from("p2p_orders").select("buyer_uid, seller_uid, status")
+      .eq("id", id).single();
+    if (!order || (order.buyer_uid !== uid && order.seller_uid !== uid)) {
+      return c.json({ success: false, error: "Order not found or access denied" }, 403);
+    }
+    if (order.status === "completed" || order.status === "cancelled") {
+      return c.json({ success: false, error: "Order is closed" }, 400);
+    }
+
+    const { data, error } = await db.from("p2p_messages" as never).insert({
+      order_id: id,
+      sender_uid: uid,
+      message,
+    }).select().single();
+
+    if (error) return c.json({ success: false, error: "Failed to send message" }, 500);
+    return c.json({ success: true, data }, 201);
+  }
+);
+
+/* ─── POST /ads/:id/pause — Pause an active ad ──────────────────────────── */
+p2p.post("/ads/:id/pause", authMiddleware, async (c) => {
+  const uid = c.get("uid") as string;
+  const id  = c.req.param("id");
+  const db  = getDb();
+  const { error } = await db.from("p2p_ads").update({ is_active: false })
+    .eq("id", id).eq("uid", uid);
+  if (error) return c.json({ success: false, error: "Update failed" }, 500);
+  return c.json({ success: true });
+});
+
+/* ─── POST /ads/:id/activate — Re-activate a paused ad ─────────────────── */
+p2p.post("/ads/:id/activate", authMiddleware, async (c) => {
+  const uid = c.get("uid") as string;
+  const id  = c.req.param("id");
+  const db  = getDb();
+  const { error } = await db.from("p2p_ads").update({ is_active: true })
+    .eq("id", id).eq("uid", uid);
+  if (error) return c.json({ success: false, error: "Update failed" }, 500);
+  return c.json({ success: true });
+});
+
 export default p2p;
