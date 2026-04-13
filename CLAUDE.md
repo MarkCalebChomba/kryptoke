@@ -364,6 +364,50 @@ Update this section when you complete or start a task. Format:
   REQUIRES: Apply migration 013 to Supabase before deploying.
   REQUIRES: ETHERSCAN_API_KEY in Vercel for EVM deposit scanning to work.
 
+[NEXUS] 2026-04-08 Wave 2 N-B DONE — Dynamic address screening with live OFAC sync.
+  server/services/addressScreening.ts — full rewrite:
+    Layered pipeline: Redis hot-cache → DB → layering heuristic → TRM → Chainalysis → AMLBot
+    Layering heuristic: same from-address credited to 3+ accounts in 24h = blocked
+    Any external API hit auto-persisted to DB + Redis (future checks instant, no API call)
+    invalidateScreeningCache() called immediately when admin adds/removes an address
+  app/api/v1/cron/sync-blocklist/route.ts — new daily cron:
+    Pulls OFAC SDN XML (official US Treasury feed, 1000+ addresses, updated weekly)
+    Two fallback OFAC URLs for resilience
+    Pulls community GitHub sanction + mixer lists (ETH sanctions, NiceHash mixer list)
+    Batch upserts 200 rows at a time; idempotent (ON CONFLICT DO NOTHING)
+    POST /api/v1/cron/sync-blocklist (CRON_SECRET header)
+    Schedule: daily 02:00 UTC on cron-job.org
+  admin/index.ts additions:
+    POST /admin/blocked-addresses/sync  — manual trigger (fires in background)
+    GET  /admin/blocked-addresses       — list with risk_level + search filters
+    POST /admin/blocked-addresses       — add address, busts Redis cache immediately
+    DELETE /admin/blocked-addresses/:id — remove address, busts cache
+    GET  /admin/compliance/alerts       — list compliance alerts by status
+    PATCH /admin/compliance/alerts/:id  — mark reviewed/closed
+  supabase/migrations/018_aml_tables.sql — static seed REMOVED:
+    No hardcoded addresses in migration — DB populated by sync-blocklist cron
+    Run sync immediately after migration: POST /api/v1/cron/sync-blocklist
+  Optional env vars to add in Vercel for richer external screening:
+    TRM_API_KEY, CHAINALYSIS_API_KEY, AMLBOT_API_KEY
+
+[NEXUS] 2026-04-08 Wave 2 N-A DONE — Payment provider registry + public config endpoint.
+  server/services/paymentProviders.ts:
+    PAYMENT_PROVIDERS: M-Pesa(KE/active), Airtel Money(KE), MTN MoMo(GH),
+    Vodafone Cash(GH), Bank Transfer(NG), MTN UG, M-Pesa TZ, EFT ZA, Card Global
+    getActiveProvidersForCountry(), getProviderById(), validateProvider()
+  server/routes/config.ts — new public route (no auth, bypasses maintenance mode):
+    GET /api/v1/config/payment-methods?country=KE
+    GET /api/v1/config/countries
+  server/index.ts — config routes mounted + /config/ added to maintenance bypass
+  mpesa.ts — deposit accepts optional provider_id, validates active + country match
+  withdraw.ts — /kes withdrawal accepts optional provider_id
+  deposit/page.tsx — fetches payment-methods for user's country, shows 'coming soon'
+    banner for countries with no active fiat provider
+  supabase/migrations/015_payment_provider_column.sql:
+    provider_id TEXT DEFAULT 'mpesa' added to deposits + withdrawals tables
+  REQUIRES: Apply migrations 013, 015, 018 to Supabase before deploying.
+  To populate blocklist after migration 018: POST /api/v1/cron/sync-blocklist
+
 # FORGE STATUS
 [FORGE] 2026-04-08 Task 5 DONE — Spot trading live on Binance/Gate.io/Bybit.
   server/services/exchange.ts — added full spot layer:
