@@ -27,6 +27,7 @@ export interface Database {
           language: "en" | "sw";
           data_saver: boolean;
           auto_earn: boolean;
+          country_code: string;
           created_at: string;
           last_active_at: string;
           suspended_until: string | null;
@@ -50,6 +51,7 @@ export interface Database {
           language?: "en" | "sw";
           data_saver?: boolean;
           auto_earn?: boolean;
+          country_code?: string;
           created_at?: string;
           last_active_at?: string;
           suspended_until?: string | null;
@@ -73,6 +75,7 @@ export interface Database {
           language?: "en" | "sw";
           data_saver?: boolean;
           auto_earn?: boolean;
+          country_code?: string;
           last_active_at?: string;
         };
       };

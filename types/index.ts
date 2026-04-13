@@ -17,6 +17,7 @@ export interface User {
   language: "en" | "sw";
   dataSaver: boolean;
   autoEarn: boolean;
+  countryCode: string; // ISO 3166-1 alpha-2, default "KE"
   createdAt: string;
   lastActiveAt: string;
 }

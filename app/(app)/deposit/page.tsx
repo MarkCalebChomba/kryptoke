@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/shared/TopBar";
 import { useMpesaDeposit } from "@/lib/hooks/useDeposit";
 import { useDepositAddress } from "@/lib/hooks/useDepositAddress";
 import { useAuth } from "@/lib/store";
 import { useToastActions } from "@/components/shared/ToastContainer";
 import { sanitizeNumberInput, isValidKenyanPhone } from "@/lib/utils/formatters";
-import { useQuery } from "@tanstack/react-query";
+import { getCurrencyForCountry } from "@/lib/utils/currency";
 import { apiGet } from "@/lib/api/client";
 import { IconMpesa, IconCopy, IconCheck, IconChevronRight } from "@/components/icons";
 import { cn } from "@/lib/utils/cn";
@@ -88,6 +90,22 @@ export default function DepositPage() {
     staleTime: 5 * 60_000,
   });
 
+  const countryCode = user?.countryCode ?? "KE";
+  const currency = getCurrencyForCountry(countryCode);
+  const isKe = countryCode === "KE";
+
+  // Fetch available payment methods for the user's country
+  // NEXUS N-A will build GET /api/v1/config/payment-methods?country=XX
+  // Until deployed, this gracefully falls back to showing M-Pesa for KE users.
+  const { data: paymentMethods } = useQuery({
+    queryKey: ["payment-methods", countryCode],
+    queryFn: () => apiGet<{ methods: Array<{ id: string; name: string; type: string }> }>(
+      `/config/payment-methods?country=${countryCode}`
+    ).catch(() => null), // endpoint not yet live — fail silently
+    staleTime: 5 * 60_000,
+  });
+  const hasFiatMethod = isKe || (paymentMethods?.methods?.length ?? 0) > 0;
+
   const [tab, setTab] = useState<DepositTab>("mpesa");
   const [copied, setCopied] = useState(false);
 
@@ -133,13 +151,33 @@ export default function DepositPage() {
       {/* Tab bar */}
       <div className="mx-4 mt-4 mb-1 tab-bar">
         <button data-active={tab === "mpesa"} onClick={() => setTab("mpesa")} className="tab-item flex items-center gap-1.5">
-          <IconMpesa size={14} className={cn(tab === "mpesa" ? "text-mpesa" : "text-text-muted")} />
-          M-Pesa (KES)
+          {isKe
+            ? <><IconMpesa size={14} className={cn(tab === "mpesa" ? "text-mpesa" : "text-text-muted")} />M-Pesa (KES)</>
+            : `${currency.code} Deposit`}
         </button>
         <button data-active={tab === "crypto"} onClick={() => setTab("crypto")} className="tab-item">
           Crypto (on-chain)
         </button>
       </div>
+
+      {/* Non-KE fiat banner — shown while NEXUS N-A is pending */}
+      {!isKe && tab === "mpesa" && !hasFiatMethod && (
+        <div className="mx-4 mt-3 rounded-xl bg-gold/10 border border-gold/30 px-4 py-3">
+          <p className="font-outfit text-sm text-gold font-semibold mb-0.5">
+            {currency.code} deposits coming soon
+          </p>
+          <p className="font-outfit text-xs text-text-muted leading-relaxed">
+            Card and bank payments for {currency.name} users are on the way.
+            In the meantime, deposit via crypto below — it&apos;s instant and works worldwide.
+          </p>
+          <button
+            onClick={() => setTab("crypto")}
+            className="mt-2 font-outfit text-xs text-primary font-semibold"
+          >
+            Switch to crypto deposit →
+          </button>
+        </div>
+      )}
 
       {/* ── M-Pesa tab ─────────────────────────────────────────────────── */}
       {tab === "mpesa" && (
