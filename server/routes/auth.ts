@@ -38,6 +38,7 @@ const registerSchema = z.object({
     .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
     .regex(/[0-9]/, "Password must contain at least one number"),
   referralCode: z.string().min(1).max(30).optional(),
+  countryCode: z.string().length(2).toUpperCase().default("KE"),
 });
 
 const loginSchema = z.object({
@@ -95,6 +96,7 @@ function toApiUser(row: {
   language: "en" | "sw";
   data_saver: boolean;
   auto_earn: boolean;
+  country_code?: string | null;
   created_at: string;
   last_active_at: string;
 }): User {
@@ -113,6 +115,7 @@ function toApiUser(row: {
     language: row.language,
     dataSaver: row.data_saver,
     autoEarn: row.auto_earn,
+    countryCode: row.country_code ?? "KE",
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,
   };
@@ -125,7 +128,7 @@ auth.post(
   withAuthRateLimit(),
   zValidator("json", registerSchema),
   async (c) => {
-    const { email, phone, password, referralCode } = c.req.valid("json");
+    const { email, phone, password, referralCode, countryCode } = c.req.valid("json");
     const normalizedPhone = normalizeKenyanPhone(phone);
 
     // Check email not already taken
@@ -157,6 +160,7 @@ auth.post(
       language: "en",
       data_saver: false,
       auto_earn: false,
+      country_code: countryCode ?? "KE",
     });
 
     // Initialize zero balances
@@ -577,6 +581,7 @@ auth.patch(
       language: z.enum(["en", "sw"]).optional(),
       dataSaver: z.boolean().optional(),
       autoEarn: z.boolean().optional(),
+      countryCode: z.string().length(2).toUpperCase().optional(),
     })
   ),
   async (c) => {
@@ -588,6 +593,7 @@ auth.patch(
       language: body.language,
       data_saver: body.dataSaver,
       auto_earn: body.autoEarn,
+      country_code: body.countryCode,
     });
 
     await invalidateUserCache(uid);

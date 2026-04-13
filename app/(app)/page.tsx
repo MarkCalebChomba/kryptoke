@@ -12,7 +12,7 @@ import { P2PSheet } from "@/components/home/P2PSheet";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { useHomeData } from "@/lib/hooks/useMarketData";
 import { useNotifications } from "@/lib/hooks/useNotifications";
-import { usePreferences } from "@/lib/store";
+import { usePreferences, useAuth } from "@/lib/store";
 import { formatPrice, formatChange, priceDirection } from "@/lib/utils/formatters";
 import { cn } from "@/lib/utils/cn";
 
@@ -171,7 +171,8 @@ export default function HomePage() {
 
   useNotifications();
 
-  const { totalKes, totalUsd, isLoading: walletLoading } = useWallet();
+  const { totalKes, totalUsd, rate, isLoading: walletLoading } = useWallet();
+  const { user } = useAuth();
   const { data: homeData, isLoading: homeLoading } = useHomeData();
   const { isFavorite } = usePreferences();
 
@@ -226,7 +227,8 @@ export default function HomePage() {
         totalKes={totalKes}
         totalUsd={totalUsd}
         isLoading={walletLoading}
-
+        countryCode={user?.countryCode ?? "KE"}
+        kesPerUsd={rate?.kesPerUsd ?? "130"}
       />
 
       {/* Quick actions — 5 across */}

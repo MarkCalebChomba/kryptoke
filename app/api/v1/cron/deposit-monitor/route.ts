@@ -343,6 +343,24 @@ async function scanEvmDeposits(): Promise<number> {
           });
 
           if (!error) {
+            // Screen the sender before crediting — never credit from sanctioned addresses
+            const { checkAddress, raiseComplianceAlert } = await import("@/server/services/addressScreening");
+            const screening = await checkAddress(transfer.from, chain.name);
+            if (screening.blocked) {
+              // Mark deposit blocked instead of crediting
+              await db.from("crypto_deposits")
+                .update({ status: "blocked" })
+                .eq("tx_hash", transfer.txHash)
+                .eq("chain_id", String(chainId));
+              raiseComplianceAlert({
+                uid: user.uid,
+                alertType: "blocked_deposit",
+                severity: screening.riskLevel === "sanctions" ? "critical" : "high",
+                details: { fromAddress: transfer.from, txHash: transfer.txHash, chain: chain.name, amount: transfer.amount, asset: transfer.tokenSymbol, riskLevel: screening.riskLevel, source: screening.source },
+              }).catch(console.error);
+              console.warn(`[EVM scanner] Blocked deposit from ${transfer.from} (${screening.riskLevel})`);
+              continue;
+            }
             await creditCryptoDeposit(
               user.uid,
               transfer.tokenSymbol,

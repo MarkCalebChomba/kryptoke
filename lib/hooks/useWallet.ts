@@ -26,9 +26,9 @@ export function useWallet() {
     if (query.data) {
       setRate(query.data.rate);
       setBalances([
-        { asset: "KES", amount: query.data.kesBalance, updatedAt: new Date().toISOString() },
-        { asset: "USDT", amount: query.data.usdtBalance, updatedAt: new Date().toISOString() },
-        { asset: "BNB", amount: query.data.bnbBalance, updatedAt: new Date().toISOString() },
+        { asset: "KES", amount: query.data.kesBalance, account: "funding", updatedAt: new Date().toISOString() },
+        { asset: "USDT", amount: query.data.usdtBalance, account: "funding", updatedAt: new Date().toISOString() },
+        { asset: "BNB", amount: query.data.bnbBalance, account: "funding", updatedAt: new Date().toISOString() },
       ]);
     }
   }, [query.data, setBalances, setRate]);

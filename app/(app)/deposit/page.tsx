@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/shared/TopBar";
@@ -9,9 +9,41 @@ import { useDepositAddress } from "@/lib/hooks/useDepositAddress";
 import { useAuth } from "@/lib/store";
 import { useToastActions } from "@/components/shared/ToastContainer";
 import { sanitizeNumberInput, isValidKenyanPhone } from "@/lib/utils/formatters";
+import { getCurrencyForCountry } from "@/lib/utils/currency";
 import { apiGet } from "@/lib/api/client";
 import { IconMpesa, IconCopy, IconCheck, IconChevronRight } from "@/components/icons";
 import { cn } from "@/lib/utils/cn";
+
+// Lazily generate QR data URL from address string
+function useQrDataUrl(value: string | undefined) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!value) { setDataUrl(null); return; }
+    let cancelled = false;
+    import("qrcode").then((QRCode) => {
+      QRCode.toDataURL(value, { width: 160, margin: 1, color: { dark: "#080C14", light: "#FFFFFF" } })
+        .then((url) => { if (!cancelled) setDataUrl(url); })
+        .catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [value]);
+  return dataUrl;
+}
+
+interface PaymentMethod {
+  id: string;
+  name: string;
+  type: string;
+  processingTime: string;
+  logoUrl: string | null;
+}
+
+interface PaymentMethodsResponse {
+  country: string;
+  providers: PaymentMethod[];
+  hasActiveProviders: boolean;
+  fallbackMessage: string | null;
+}
 
 // ─── Token + chain data (mirrors DepositSheet) ────────────────────────────
 const DEPOSIT_TOKENS = [
@@ -47,9 +79,32 @@ type DepositTab = "mpesa" | "crypto";
 type CryptoStep = "token" | "chain" | "address";
 
 export default function DepositPage() {
-  const router = useRouter();
   const toast = useToastActions();
   const { user } = useAuth();
+  const countryCode = (user as Record<string, unknown>)?.country_code as string ?? "KE";
+
+  // Fetch available payment methods for this user's country
+  const { data: paymentMethodsData } = useQuery({
+    queryKey: ["config", "payment-methods", countryCode],
+    queryFn: () => apiGet<PaymentMethodsResponse>(`/config/payment-methods?country=${countryCode}`),
+    staleTime: 5 * 60_000,
+  });
+
+  const countryCode = user?.countryCode ?? "KE";
+  const currency = getCurrencyForCountry(countryCode);
+  const isKe = countryCode === "KE";
+
+  // Fetch available payment methods for the user's country
+  // NEXUS N-A will build GET /api/v1/config/payment-methods?country=XX
+  // Until deployed, this gracefully falls back to showing M-Pesa for KE users.
+  const { data: paymentMethods } = useQuery({
+    queryKey: ["payment-methods", countryCode],
+    queryFn: () => apiGet<{ methods: Array<{ id: string; name: string; type: string }> }>(
+      `/config/payment-methods?country=${countryCode}`
+    ).catch(() => null), // endpoint not yet live — fail silently
+    staleTime: 5 * 60_000,
+  });
+  const hasFiatMethod = isKe || (paymentMethods?.methods?.length ?? 0) > 0;
 
   const [tab, setTab] = useState<DepositTab>("mpesa");
   const [copied, setCopied] = useState(false);
@@ -66,6 +121,7 @@ export default function DepositPage() {
   const { address, memo, isLoading: addrLoading } = useDepositAddress(
     cryptoStep === "address" ? selectedChain.chainId : null
   );
+  const qrDataUrl = useQrDataUrl(address ?? undefined);
 
   async function handleMpesaDeposit() {
     const amt = parseFloat(amount);
@@ -95,17 +151,47 @@ export default function DepositPage() {
       {/* Tab bar */}
       <div className="mx-4 mt-4 mb-1 tab-bar">
         <button data-active={tab === "mpesa"} onClick={() => setTab("mpesa")} className="tab-item flex items-center gap-1.5">
-          <IconMpesa size={14} className={cn(tab === "mpesa" ? "text-mpesa" : "text-text-muted")} />
-          M-Pesa (KES)
+          {isKe
+            ? <><IconMpesa size={14} className={cn(tab === "mpesa" ? "text-mpesa" : "text-text-muted")} />M-Pesa (KES)</>
+            : `${currency.code} Deposit`}
         </button>
         <button data-active={tab === "crypto"} onClick={() => setTab("crypto")} className="tab-item">
           Crypto (on-chain)
         </button>
       </div>
 
+      {/* Non-KE fiat banner — shown while NEXUS N-A is pending */}
+      {!isKe && tab === "mpesa" && !hasFiatMethod && (
+        <div className="mx-4 mt-3 rounded-xl bg-gold/10 border border-gold/30 px-4 py-3">
+          <p className="font-outfit text-sm text-gold font-semibold mb-0.5">
+            {currency.code} deposits coming soon
+          </p>
+          <p className="font-outfit text-xs text-text-muted leading-relaxed">
+            Card and bank payments for {currency.name} users are on the way.
+            In the meantime, deposit via crypto below — it&apos;s instant and works worldwide.
+          </p>
+          <button
+            onClick={() => setTab("crypto")}
+            className="mt-2 font-outfit text-xs text-primary font-semibold"
+          >
+            Switch to crypto deposit →
+          </button>
+        </div>
+      )}
+
       {/* ── M-Pesa tab ─────────────────────────────────────────────────── */}
       {tab === "mpesa" && (
         <div className="px-4 pt-4 space-y-4">
+
+          {/* Coming-soon banner for countries with no active fiat provider */}
+          {paymentMethodsData && !paymentMethodsData.hasActiveProviders && (
+            <div className="card bg-primary/5 border-primary/20">
+              <p className="font-outfit text-xs text-primary font-semibold mb-1">Fiat payments coming soon</p>
+              <p className="font-outfit text-xs text-text-secondary leading-relaxed">
+                {paymentMethodsData.fallbackMessage ?? "Mobile money and card payments are not yet available in your region. Use the Crypto tab to deposit."}
+              </p>
+            </div>
+          )}
           {/* Quick amounts */}
           <div>
             <p className="font-outfit text-xs text-text-muted mb-2 uppercase tracking-wide">Quick Amounts</p>
@@ -254,18 +340,17 @@ export default function DepositPage() {
                 <div className="skeleton h-40 rounded-2xl" />
               ) : (
                 <div className="card space-y-4">
-                  {/* QR Code area */}
+                  {/* QR Code */}
                   <div className="flex flex-col items-center py-4">
-                    <div className="w-36 h-36 rounded-2xl bg-bg-surface2 border border-border flex items-center justify-center mb-3">
-                      <div className="grid grid-cols-7 gap-0.5 opacity-70">
-                        {Array.from({ length: 49 }).map((_, i) => (
-                          <div key={i} className={cn("w-3.5 h-3.5 rounded-[2px]",
-                            (Math.sin(i * 7 + 3) * 0.5 + 0.5) > 0.45 ? "bg-text-primary" : "bg-transparent"
-                          )} />
-                        ))}
-                      </div>
+                    <div className="w-40 h-40 rounded-2xl bg-white p-2 flex items-center justify-center">
+                      {qrDataUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={qrDataUrl} alt="Deposit address QR code" width={144} height={144} className="rounded-xl" />
+                      ) : (
+                        <div className="w-36 h-36 bg-bg-surface2 rounded-xl animate-pulse" />
+                      )}
                     </div>
-                    <p className="font-outfit text-[10px] text-text-muted">Scan with your wallet app</p>
+                    <p className="font-outfit text-[10px] text-text-muted mt-2">Scan with your wallet app</p>
                   </div>
 
                   {/* Address */}
@@ -283,11 +368,12 @@ export default function DepositPage() {
                     </div>
                   </div>
 
-                  {/* Memo if needed */}
+                  {/* Memo / Destination Tag if needed */}
                   {memo && (
                     <div>
                       <p className="font-outfit text-xs text-text-muted mb-1.5">
-                        Memo / Tag <span className="text-down font-semibold">(Required)</span>
+                        {selectedChain.chainId === "XRP" ? "Destination Tag" : "Memo / Tag"}{" "}
+                        <span className="text-down font-semibold">(Required)</span>
                       </p>
                       <div className="flex items-center gap-2 bg-down/5 border border-down/30 rounded-xl px-3 py-2.5">
                         <p className="flex-1 font-price text-sm text-text-primary">{memo}</p>
@@ -296,7 +382,9 @@ export default function DepositPage() {
                         </button>
                       </div>
                       <p className="font-outfit text-[10px] text-down mt-1">
-                        You must include this memo or your deposit will not be credited.
+                        {selectedChain.chainId === "XRP"
+                          ? "You must include this Destination Tag. Deposits without it cannot be credited."
+                          : "You must include this memo or your deposit will not be credited."}
                       </p>
                     </div>
                   )}

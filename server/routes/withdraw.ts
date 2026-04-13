@@ -33,6 +33,7 @@ import { getDb } from "@/server/db/client";
 import { Notifications } from "@/server/services/notifications";
 import { isValidKenyanPhone } from "@/lib/utils/formatters";
 import { subtract, add, lt } from "@/lib/utils/money";
+import { checkAddress, raiseComplianceAlert } from "@/server/services/addressScreening";
 import Big from "big.js";
 
 const withdraw = new Hono();
@@ -42,6 +43,34 @@ const MIN_WITHDRAWAL_KES = "500";
 const MPESA_FEE_PERCENT = "0.01"; // 1%
 
 withdraw.use("*", authMiddleware);
+
+
+async function checkAmlRestriction(uid: string, amountUsd: number): Promise<{ blocked: boolean; reason: string }> {
+  try {
+    const db = getDb();
+    const { data: aml } = await db
+      .from("aml_risk_scores" as never)
+      .select("status, score")
+      .eq("uid", uid)
+      .maybeSingle();
+
+    if (!aml) return { blocked: false, reason: "" };
+
+    const status = (aml as { status: string; score: number }).status;
+    const score = (aml as { status: string; score: number }).score;
+
+    if (status === "suspended") {
+      return { blocked: true, reason: "Withdrawal unavailable" }; // never reveal AML reason
+    }
+    if (status === "restricted" && amountUsd > 200) {
+      return { blocked: true, reason: "Withdrawal pending review" };
+    }
+    void score; // suppress unused warning
+    return { blocked: false, reason: "" };
+  } catch {
+    return { blocked: false, reason: "" }; // fail open if table not yet migrated
+  }
+}
 
 async function getConfig(key: string, fallback: string): Promise<string> {
   const db = getDb();
@@ -89,17 +118,36 @@ withdraw.post("/kes", withSensitiveRateLimit(),
     amount: z.number().min(100).max(150_000),
     phone: z.string().refine(isValidKenyanPhone, "Invalid phone number"),
     assetPin: z.string().length(6).regex(/^\d+$/),
+    provider_id: z.string().min(1).max(30).default("mpesa"),
   })),
   async (c) => {
     const { uid } = c.get("user");
-    const { amount, phone, assetPin } = c.req.valid("json");
+    const { amount, phone, assetPin, provider_id } = c.req.valid("json");
     const amountStr = amount.toFixed(2);
     const db = getDb();
 
+    // Validate provider
+    const { validateProvider } = await import("@/server/services/paymentProviders");
     const userRow = await findUserByUid(uid);
     if (!userRow?.asset_pin_hash) return c.json({ success: false, error: "Asset PIN not set", statusCode: 400 }, 400);
+
+    const countryCode = (userRow as Record<string, unknown>)?.country_code as string ?? "KE";
+    const providerCheck = validateProvider(provider_id, countryCode);
+    if ("error" in providerCheck) {
+      return c.json({ success: false, error: providerCheck.error, statusCode: 400 }, 400);
+    }
+    if (provider_id !== "mpesa") {
+      return c.json({ success: false, error: `${providerCheck.provider.name} withdrawals are coming soon.`, statusCode: 400 }, 400);
+    }
     const pinValid = await bcrypt.compare(assetPin, userRow.asset_pin_hash);
     if (!pinValid) return c.json({ success: false, error: "Incorrect asset PIN", statusCode: 400 }, 400);
+
+    // ── AML restriction check ────────────────────────────────────────────────
+    const { data: fxRate } = await db.from("system_config").select("value").eq("key", "kes_per_usd").maybeSingle().catch(() => ({ data: null }));
+    const kesPerUsdRate = parseFloat((fxRate?.value as string | null) ?? "130");
+    const amountUsdKes = amount / kesPerUsdRate;
+    const amlCheck = await checkAmlRestriction(uid, amountUsdKes);
+    if (amlCheck.blocked) return c.json({ success: false, error: amlCheck.reason, statusCode: 403 }, 403);
 
     const today = new Date().toISOString().split("T")[0] ?? "";
     const { data: dailyTotal } = await db.rpc("get_daily_withdrawal_total", { p_uid: uid, p_date: today });
@@ -117,7 +165,7 @@ withdraw.post("/kes", withSensitiveRateLimit(),
     await upsertBalance(uid, "KES", subtract(kesBalance, amountStr), "funding");
 
     const { data: wr, error: ie } = await db.from("withdrawals")
-      .insert({ uid, type: "kes", amount: amountStr, fee, net_amount: netAmount, phone, status: "processing" })
+      .insert({ uid, type: "kes", amount: amountStr, fee, net_amount: netAmount, phone, status: "processing", provider_id })
       .select().single();
 
     if (ie || !wr) { await upsertBalance(uid, "KES", kesBalance, "funding"); return c.json({ success: false, error: "Failed to create record", statusCode: 500 }, 500); }
@@ -296,8 +344,35 @@ withdraw.post("/crypto", withSensitiveRateLimit(),
     const pinValid = await bcrypt.compare(assetPin, userRow.asset_pin_hash);
     if (!pinValid) return c.json({ success: false, error: "Incorrect asset PIN", statusCode: 400 }, 400);
 
+    // ── AML restriction check ────────────────────────────────────────────────
+    // Rough USD value: USDT is 1:1, others use a simple estimate
+    const roughUsd = asset === "KES" ? parseFloat(amount) / 130 : parseFloat(amount);
+    const amlCheckCrypto = await checkAmlRestriction(uid, roughUsd);
+    if (amlCheckCrypto.blocked) return c.json({ success: false, error: amlCheckCrypto.reason, statusCode: 403 }, 403);
+
     const { withdrawFrozen } = await checkFreeze(asset, chainId);
     if (withdrawFrozen) return c.json({ success: false, error: `Withdrawals for ${asset} on this network are temporarily suspended.`, statusCode: 400 }, 400);
+
+    // ── Address screening — check before any balance deduction ───────────────
+    // Never reveal the real reason; generic message prevents info leakage.
+    const screening = await checkAddress(toAddress, chainId);
+    if (screening.blocked) {
+      const { uid: screeningUid } = c.get("user");
+      raiseComplianceAlert({
+        uid: screeningUid,
+        alertType: "blocked_withdrawal",
+        severity: screening.riskLevel === "sanctions" ? "critical" : "high",
+        details: {
+          toAddress,
+          chainId,
+          asset,
+          amount,
+          riskLevel: screening.riskLevel,
+          source: screening.source,
+        },
+      }).catch(console.error); // fire-and-forget, non-fatal
+      return c.json({ success: false, error: "Withdrawal unavailable.", statusCode: 403 }, 403);
+    }
 
     const { flat: feeFlat, pct: feePct, minWithdraw } = await getChainFee(chainId, asset);
     const totalFee = new Big(feeFlat).plus(new Big(amount).times(feePct)).toFixed(18);

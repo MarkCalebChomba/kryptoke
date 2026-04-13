@@ -13,6 +13,7 @@ import { useAppStore } from "@/lib/store";
 import { useToastActions } from "@/components/shared/ToastContainer";
 import { cn } from "@/lib/utils/cn";
 import { isValidKenyanPhone } from "@/lib/utils/formatters";
+import { COUNTRY_OPTIONS } from "@/lib/utils/currency";
 import type { User } from "@/types";
 
 type Step = "details" | "verify-email" | "verify-phone";
@@ -51,6 +52,7 @@ function DetailsStep({ onSuccess }: { onSuccess: (email: string, phone: string) 
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [referralCode, setReferralCode] = useState("");
+  const [countryCode, setCountryCode] = useState("KE");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -80,7 +82,7 @@ function DetailsStep({ onSuccess }: { onSuccess: (email: string, phone: string) 
 
     setIsLoading(true);
     try {
-      await apiPost<RegisterResponse>("/auth/register", { email, phone, password, ...(referralCode.trim() ? { referralCode: referralCode.trim() } : {}) });
+      await apiPost<RegisterResponse>("/auth/register", { email, phone, password, countryCode, ...(referralCode.trim() ? { referralCode: referralCode.trim() } : {}) });
       toast.success("Account created", "Check your email for a verification code");
       onSuccess(email, phone);
     } catch (err) {
@@ -111,6 +113,31 @@ function DetailsStep({ onSuccess }: { onSuccess: (email: string, phone: string) 
         <input id="email" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false}
           value={email} onChange={(e) => setEmail(e.target.value)}
           className="input-field" placeholder="you@example.com" disabled={isLoading} />
+      </div>
+
+      <div>
+        <label htmlFor="country" className="block font-outfit text-sm text-text-secondary mb-1.5">Country</label>
+        <div className="relative">
+          <select
+            id="country"
+            value={countryCode}
+            onChange={(e) => setCountryCode(e.target.value)}
+            disabled={isLoading}
+            className="input-field appearance-none pr-10 cursor-pointer"
+          >
+            {COUNTRY_OPTIONS.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.flag} {c.name}
+              </option>
+            ))}
+          </select>
+          <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-muted">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <p className="text-text-muted font-outfit text-xs mt-1">Used to show local currency and payment options</p>
       </div>
 
       <div>
