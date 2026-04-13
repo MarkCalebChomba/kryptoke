@@ -440,6 +440,30 @@ Update this section when you complete or start a task. Format:
   - Extends fulfillment_type CHECK: adds 'exchange', 'internal'
   REQUIRES: Apply migration 014 to Supabase before deploying
 
+[FORGE] 2026-04-13 Wave 2 F-A DONE — Home page All Markets token list.
+  server/routes/market.ts: /home endpoint now returns marketList (top 50, DB+Redis)
+  lib/hooks/useMarketData.ts: MarketListCoin type + marketList in HomeData
+  app/(app)/page.tsx: AllMarkets vertical list, 56px rows, sparkline, tap→/markets/[sym]
+
+[FORGE] 2026-04-13 Wave 2 F-B DONE — Token list expanded to 200.
+  server/jobs/prices.ts: CoinGecko parallel page 1+2 fetch (200 tokens total)
+  app/(app)/markets/page.tsx: PAGE_SIZE=50, FETCH_LIMIT=200, client-side cache+slice
+  components/home/MarketList.tsx: LIST_PAGE_SIZE=50, Load More button
+  scripts/seed-tokens.mts: production run comment added
+
+[FORGE] 2026-04-13 Wave 2 F-C DONE — Gamification (XP, levels, badges, leaderboard).
+  supabase/migrations/017_gamification.sql: tables + views + RLS
+    user_xp_events, user_badges, user_levels view
+    xp_leaderboard_weekly/alltime views
+  server/services/gamify.ts: awardXp, awardBadge, getUserLevel, getLeaderboard, getUserRank
+    14 badge definitions, Platinum/Diamond 10% fee discount
+  XP integrations (all fire-and-forget):
+    trade.ts: +10 XP/trade + fee discount for Platinum/Diamond
+    mpesa.ts: +200 XP + first_deposit badge on first M-Pesa deposit
+    p2p.ts:   +25 XP seller, +15 XP buyer on crypto release
+    auth.ts:  +150 XP to referrer on referee registration
+  REQUIRES: Apply migration 017_gamification.sql to Supabase
+
 # SHIELD STATUS
 [SHIELD] [2026-04-08] Task 8 DONE — Migration 012_rls_custom_jwt.sql: replaced all auth.uid() RLS policies with get_app_uid() that reads request.jwt.claims->>'uid'. Added .setSubject(uid) to JWT. PREREQ: Supabase JWT secret must match JWT_SECRET in Vercel env.
 [SHIELD] [2026-04-08] Task 9 DONE — transfer-to-user: added Redis advisory lock (prevents double-spend race), recipient wallet cache bust, in-app notification INSERT for recipient. Fixed P2PSheet canSend bug (was always checking usdtBalance even for KES transfers).
