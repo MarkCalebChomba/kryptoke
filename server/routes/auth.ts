@@ -97,6 +97,7 @@ function toApiUser(row: {
   data_saver: boolean;
   auto_earn: boolean;
   country_code?: string | null;
+  onboarded_at?: string | null;
   created_at: string;
   last_active_at: string;
 }): User {
@@ -116,6 +117,7 @@ function toApiUser(row: {
     dataSaver: row.data_saver,
     autoEarn: row.auto_earn,
     countryCode: row.country_code ?? "KE",
+    onboardedAt: row.onboarded_at ?? null,
     createdAt: row.created_at,
     lastActiveAt: row.last_active_at,
   };
@@ -845,6 +847,15 @@ auth.patch(
     return c.json({ success: true, data: { code } });
   }
 );
+
+/* ─── POST /onboarding-complete — mark wizard as done ───────────────────── */
+
+auth.post("/onboarding-complete", authMiddleware, async (c) => {
+  const { uid } = c.get("user");
+  const updated = await updateUser(uid, { onboarded_at: new Date().toISOString() });
+  await invalidateUserCache(uid);
+  return c.json({ success: true, data: toApiUser(updated) });
+});
 
 /* ─── GET /sessions ─────────────────────────────────────────────────────── */
 

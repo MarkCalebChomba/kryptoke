@@ -14,6 +14,7 @@ import { useToastActions } from "@/components/shared/ToastContainer";
 import { cn } from "@/lib/utils/cn";
 import { isValidKenyanPhone } from "@/lib/utils/formatters";
 import { COUNTRY_OPTIONS } from "@/lib/utils/currency";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import type { User } from "@/types";
 
 type Step = "details" | "verify-email" | "verify-phone";
@@ -346,18 +347,24 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [isComplete, setIsComplete] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   function handleDetailsSuccess(e: string, p: string) { setEmail(e); setPhone(p); setStep("verify-email"); }
   function handleEmailVerified(user: User, token: string) { setStoredToken(token); setUser(user, token); setStep("verify-phone"); }
   async function handleResendEmail() { await apiPost("/auth/otp/send", { type: "email", identifier: email }); }
   function handlePhoneVerified() { setIsComplete(true); }
   function handlePhoneSkipped() { toast.info("You can verify your phone later in Settings"); setIsComplete(true); }
-  function handleContinue() { router.replace("/"); }
+  // After success screen "Go to KryptoKe", show onboarding wizard
+  function handleContinue() { setShowOnboarding(true); }
+  function handleOnboardingComplete() { router.replace("/"); }
 
   const stepTitles: Record<Step, string> = { details: "Create account", "verify-email": "Verify email", "verify-phone": "Verify phone" };
 
   return (
     <div className="min-h-dvh bg-bg flex flex-col">
+      {showOnboarding && (
+        <OnboardingWizard onComplete={handleOnboardingComplete} />
+      )}
       <div className="flex-1 flex flex-col px-6 pt-safe pt-6 pb-10">
         {!isComplete && (
           <div className="flex items-center mb-6">

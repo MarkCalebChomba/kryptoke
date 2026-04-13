@@ -1,22 +1,32 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAppStore } from "@/lib/store";
 import { BottomNav } from "@/components/shared/BottomNav";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useSupabaseSession, useRealtimeBalances } from "@/lib/hooks/useRealtimeBalances";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 
 // ── Inner component — only mounts when authenticated ─────────────────────────
-// Keeps hooks from running before the user is ready.
 function AuthenticatedShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const user = useAppStore((s) => s.user);
+  const [onboardingDone, setOnboardingDone] = useState(false);
 
   // Inject custom JWT into Supabase client so Realtime RLS passes
   useSupabaseSession();
   // Subscribe to live balance + notification updates
   useRealtimeBalances();
+
+  // Show wizard for users who haven't completed onboarding yet.
+  // Skip on auth pages to avoid loops; user object needed so wait until ready.
+  const showWizard =
+    !onboardingDone &&
+    user != null &&
+    user.onboardedAt == null &&
+    !pathname.startsWith("/auth");
 
   return (
     <div className="relative w-full h-dvh overflow-hidden bg-bg" suppressHydrationWarning>
@@ -24,6 +34,9 @@ function AuthenticatedShell({ children }: { children: React.ReactNode }) {
         <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
       </main>
       <BottomNav />
+      {showWizard && (
+        <OnboardingWizard onComplete={() => setOnboardingDone(true)} />
+      )}
     </div>
   );
 }
