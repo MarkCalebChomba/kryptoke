@@ -24,6 +24,10 @@ import adminRoutes from "./routes/admin/index";
 import supportRoutes from "./routes/support";
 import configRoutes from "./routes/config";
 import gamifyRoutes from "./routes/gamify";
+import p2pRoutes from "./routes/p2p";
+import referralRoutes from "./routes/referral";
+import rewardsRoutes from "./routes/rewards";
+import accountRoutes from "./routes/account";
 
 const app = new Hono().basePath("/api/v1");
 
@@ -130,6 +134,10 @@ app.route("/support", supportRoutes);
 app.route("/config", configRoutes);
 app.route("/admin", adminRoutes);
 app.route("/gamify", gamifyRoutes);
+app.route("/p2p", p2pRoutes);
+app.route("/referral", referralRoutes);
+app.route("/rewards", rewardsRoutes);
+app.route("/account", accountRoutes);
 app.route("/", feedbackRoutes);
 
 /* ─── 404 ────────────────────────────────────────────────────────────────── */
