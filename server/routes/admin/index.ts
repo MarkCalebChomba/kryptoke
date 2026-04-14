@@ -1755,4 +1755,104 @@ admin.delete("/blocked-addresses/:id", async (c) => {
 
   return c.json({ success: true });
 });
+/* ═══════════════════════════════════════════════════════════════════════════
+   AIRDROP — POST /admin/airdrop
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+admin.post(
+  "/airdrop",
+  zValidator(
+    "json",
+    z.object({
+      asset:           z.string().min(1).max(10).default("KKE"),
+      amount_per_user: z.string().regex(/^\d+(\.\d+)?$/, "Must be a positive number"),
+      segment:         z.enum(["all", "kyc_verified", "new_users_7d", "single"]),
+      uid:             z.string().uuid().optional(),
+      note:            z.string().min(1).max(300),
+    })
+  ),
+  async (c) => {
+    const { uid: adminUid } = c.get("user");
+    const { asset, amount_per_user, segment, uid, note } = c.req.valid("json");
+
+    if (segment === "single" && !uid) {
+      return c.json({ success: false, error: "uid is required when segment is 'single'", statusCode: 400 }, 400);
+    }
+
+    // Warn if trying to airdrop USDT — prefer KKE for volume ops
+    if (asset === "USDT" && segment === "all") {
+      return c.json({
+        success: false,
+        error: "Cannot airdrop USDT to all users — use KKE or a more targeted segment.",
+        statusCode: 400,
+      }, 400);
+    }
+
+    try {
+      const { executeAirdrop } = await import("@/server/services/airdrop");
+      const result = await executeAirdrop({
+        asset,
+        amountPerUser: amount_per_user,
+        segment,
+        uid,
+        note,
+        createdByUid: adminUid,
+      });
+
+      return c.json({ success: true, data: result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ success: false, error: msg, statusCode: 500 }, 500);
+    }
+  }
+);
+
+/* ─── GET /admin/airdrops — list past airdrops ───────────────────────────── */
+
+admin.get("/airdrops", async (c) => {
+  const db = getDb();
+  const { data } = await db
+    .from("airdrops")
+    .select("id, segment, asset, amount_per_user, recipient_count, total_amount, note, created_at")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  return c.json({ success: true, data: data ?? [] });
+});
+
+/* ─── GET /admin/kke/stats — KKE supply stats for dashboard card ────────── */
+
+admin.get("/kke/stats", async (c) => {
+  const db = getDb();
+
+  const [configRow, circulatingRes] = await Promise.all([
+    db.from("tokens").select("total_supply").eq("symbol", "KKE").maybeSingle(),
+    db.from("balances")
+      .select("amount")
+      .eq("asset", "KKE")
+      .eq("account", "funding"),
+  ]);
+
+  const totalSupply = configRow.data?.total_supply ?? "1000000000";
+  const circulating = (circulatingRes.data ?? [])
+    .reduce((sum: number, r: { amount: string }) => sum + parseFloat(String(r.amount ?? "0")), 0)
+    .toFixed(2);
+
+  const { data: recentAirdrops } = await db
+    .from("airdrops")
+    .select("id, segment, asset, amount_per_user, recipient_count, total_amount, note, created_at")
+    .eq("asset", "KKE")
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  return c.json({
+    success: true,
+    data: {
+      symbol: "KKE",
+      totalSupply,
+      circulatingSupply: circulating,
+      recentAirdrops: recentAirdrops ?? [],
+    },
+  });
+});
+
 export default admin;

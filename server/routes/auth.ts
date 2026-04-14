@@ -200,6 +200,16 @@ auth.post(
       console.error("[register] Email OTP send failed:", emailErr);
     }
 
+    // Welcome KKE airdrop — fire-and-forget, non-fatal
+    ;(async () => {
+      try {
+        const { creditKkeWelcomeBonus } = await import("@/server/services/airdrop");
+        await creditKkeWelcomeBonus(user.uid);
+      } catch (kkeErr) {
+        console.error("[register] KKE welcome bonus failed:", kkeErr);
+      }
+    })();
+
     return c.json(
       {
         success: true,
