@@ -634,7 +634,56 @@ Update this section when you complete or start a task. Format:
     RaiseTicketSheet: type selector, subject, brief → ✨ AI expand button (POST /ai-suggest),
       full description textarea, submit (POST /tickets), success confirmation screen
 
-  PREREQ: ANTHROPIC_API_KEY must be set in Vercel env vars```
+  PREREQ: ANTHROPIC_API_KEY must be set in Vercel env vars
+
+[PULSE] 2026-04-14 Wave 3 P-C DONE — Airdrop notification UX.
+  types/index.ts — added 'airdrop' to NotificationType and ToastMessage type unions
+  components/shared/ToastContainer.tsx — gold-bordered 'airdrop' toast (🪙, 6s duration, ring-1);
+    ToastContainer detects airdrop toasts and triggers Confetti component
+  lib/hooks/useRealtimeBalances.ts — two detection paths:
+    (1) balances UPDATE: KKE asset going from 0 → positive fires airdrop toast immediately
+    (2) notifications INSERT: type='airdrop' fires gold toast via addToast
+
+[PULSE] 2026-04-14 Wave 4 P-C DONE — Account settings (no more showRoadmap).
+  app/(app)/account/page.tsx:
+    Language toggle: saves to PATCH /auth/profile, shows Swahili note inline (not modal)
+    Appearance: dark/light/system toggle writes _kk_theme to localStorage, applies
+      class to document.documentElement without page reload
+    Notification prefs: live toggle switches wired to GET/PATCH /account/notification-preferences
+    API Access: links to /account/api (removed showRoadmap)
+    Get Help shortcut: links to /support (removed showRoadmap)
+  app/(app)/account/api/page.tsx: endpoint updated from /auth/api-keys → /account/api-keys
+  server/routes/account.ts: GET/POST/DELETE /account/api-keys added
+    POST creates key: kk_live_<40hex>, stores key_hash (sha256), returns plaintext ONCE
+    Max 10 keys per user, requires withSensitiveRateLimit
+  supabase/migrations/024_api_keys.sql: api_keys table + RLS (get_app_uid)
+  styles/globals.css: html.light {} overrides for bg/surface/border/text CSS vars
+
+[PULSE] 2026-04-14 Wave 4 P-D DONE — KKE balance display.
+  app/(app)/me/page.tsx: KKE rows rendered with:
+    gold border-l accent + bg-gold/5 on the row
+    /icon-192.png logo in gold circle (not emoji)
+    'Exchange Token' badge in gold
+    KKE amounts shown as integers (no USD conversion — internal token)
+    Tap disabled (no markets page for KKE yet)
+  lib/hooks/useRealtimeBalances.ts: prevKkeRef tracks previous balance;
+    0→positive transition fires airdrop toast in real-time
+
+[PULSE] 2026-04-14 Wave 4 P-E DONE — DEX page overhaul.
+  app/(app)/dex/page.tsx: complete rewrite:
+    PancakeSwap V2 API client-side price quotes (api.pancakeswap.info/api/v2/tokens/{addr})
+    Real token logos merged from /tokens DB table + LOGO_FALLBACKS map
+    Slippage: 0.1% / 0.5% / 1.0% + Custom input (shows warning if >5%)
+    Swap executes via POST /wallet/dex-swap (not /trade/submit)
+    Asset PIN sheet if server returns pin error
+    BSC badge + spread disclosure
+  server/routes/wallet.ts: POST /wallet/dex-swap:
+    Fetches PancakeSwap V2 prices for both tokens
+    Applies 0.5% platform spread on fromToken price
+    Validates + deducts fromToken balance, credits toToken
+    Creates ledger entries for both sides (type: 'trade', ref_type: 'dex_swap')
+    Clears wallet:info Redis cache after swap
+    Supports asset PIN verification if user has one set```
 
 ---
 
