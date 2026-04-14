@@ -378,7 +378,8 @@ export type NotificationType =
   | "earn_interest"
   | "order_filled"
   | "announcement"
-  | "kyc_update";
+  | "kyc_update"
+  | "airdrop";
 
 export interface Notification {
   id: string;
@@ -606,7 +607,7 @@ export type AppScreen = "home" | "markets" | "trade" | "earn" | "me";
 
 export interface ToastMessage {
   id: string;
-  type: "success" | "error" | "info" | "warning";
+  type: "success" | "error" | "info" | "warning" | "airdrop";
   title: string;
   description?: string;
   duration?: number;

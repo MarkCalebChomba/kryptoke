@@ -339,6 +339,145 @@ wallet.get("/history", async (c) => {
   });
 });
 
+/* ─── POST /dex-swap — Internal DEX swap using PancakeSwap rate ─────────── */
+
+wallet.post(
+  "/dex-swap",
+  withSensitiveRateLimit(),
+  zValidator("json", z.object({
+    fromToken: z.string().min(1).max(20),
+    toToken:   z.string().min(1).max(20),
+    amountIn:  z.string().regex(/^\d+(\.\d+)?$/, "Invalid amount"),
+    slippage:  z.number().min(0.01).max(50).default(0.5),
+    assetPin:  z.string().optional(),
+  })),
+  async (c) => {
+    const { uid } = c.get("user");
+    const { fromToken, toToken, amountIn, slippage, assetPin } = c.req.valid("json");
+
+    // Verify asset PIN if user has one set
+    const userRow = await findUserByUid(uid);
+    if (userRow?.asset_pin_hash) {
+      if (!assetPin) {
+        return c.json({ success: false, error: "Asset PIN required", statusCode: 400 }, 400);
+      }
+      const pinOk = await bcrypt.compare(assetPin, userRow.asset_pin_hash);
+      if (!pinOk) {
+        return c.json({ success: false, error: "Incorrect asset PIN", statusCode: 400 }, 400);
+      }
+    }
+
+    // ── Get prices from PancakeSwap V2 API ────────────────────────────────
+    // Tokens we support mapped to their BSC addresses
+    const BSC_ADDRESSES: Record<string, string> = {
+      USDT:  "0x55d398326f99059fF775485246999027B3197955",
+      USDC:  "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+      BTC:   "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+      ETH:   "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+      BNB:   "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+      CAKE:  "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+      SOL:   "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF",
+      XRP:   "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE",
+      KKE:   "INTERNAL",
+    };
+
+    async function getPcsUsdPrice(symbol: string): Promise<number> {
+      if (symbol === "USDT" || symbol === "USDC") return 1;
+      if (symbol === "KKE") return 0.001; // internal placeholder price
+      const addr = BSC_ADDRESSES[symbol];
+      if (!addr || addr === "INTERNAL") return 0;
+      try {
+        const res = await fetch(`https://api.pancakeswap.info/api/v2/tokens/${addr}`, {
+          headers: { "User-Agent": "KryptoKe/1.0" },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (!res.ok) throw new Error("PCS API error");
+        const data = await res.json() as { data?: { price?: string } };
+        return parseFloat(data.data?.price ?? "0") || 0;
+      } catch {
+        return 0;
+      }
+    }
+
+    const [fromUsd, toUsd] = await Promise.all([
+      getPcsUsdPrice(fromToken),
+      getPcsUsdPrice(toToken),
+    ]);
+
+    if (fromUsd <= 0 || toUsd <= 0) {
+      return c.json({
+        success: false,
+        error: `Price unavailable for ${fromUsd <= 0 ? fromToken : toToken}. Try again.`,
+        statusCode: 400,
+      }, 400);
+    }
+
+    const spread = 0.005; // 0.5% platform spread
+    const effectiveFromUsd = fromUsd * (1 - spread);
+    const amountOut = ((parseFloat(amountIn) * effectiveFromUsd) / toUsd).toFixed(8);
+    const minOut = (parseFloat(amountOut) * (1 - slippage / 100)).toFixed(8);
+    const priceImpact = parseFloat(amountIn) * fromUsd > 10000 ? "0.15"
+      : parseFloat(amountIn) * fromUsd > 1000 ? "0.05" : "0.01";
+
+    // ── Check & deduct from balance ───────────────────────────────────────
+    const fromBal = await getBalance(uid, fromToken, "funding");
+    const { validateAmount: _va, subtract: sub, add: addBal } = await import("@/lib/utils/money");
+
+    if (parseFloat(fromBal) < parseFloat(amountIn)) {
+      return c.json({
+        success: false,
+        error: `Insufficient ${fromToken} balance. Available: ${parseFloat(fromBal).toFixed(6)}`,
+        statusCode: 400,
+      }, 400);
+    }
+
+    const newFromBal = subtract(fromBal, amountIn);
+    const toBal      = await getBalance(uid, toToken, "funding");
+    const newToBal   = add(toBal, amountOut);
+
+    // Atomic balance update + ledger entries
+    await Promise.all([
+      upsertBalance(uid, fromToken, newFromBal, "funding"),
+      upsertBalance(uid, toToken,   newToBal,   "funding"),
+      createLedgerEntry({
+        uid,
+        type: "trade",
+        asset: fromToken,
+        amount: `-${amountIn}`,
+        account: "funding",
+        ref_type: "dex_swap",
+        note: `DEX swap ${amountIn} ${fromToken} → ${amountOut} ${toToken}`,
+      }),
+      createLedgerEntry({
+        uid,
+        type: "trade",
+        asset: toToken,
+        amount: amountOut,
+        account: "funding",
+        ref_type: "dex_swap",
+        note: `DEX swap ${amountIn} ${fromToken} → ${amountOut} ${toToken}`,
+      }),
+    ]);
+
+    // Invalidate wallet cache
+    const { redis } = await import("@/lib/redis/client");
+    await redis.del(`wallet:info:${uid}`).catch(() => undefined);
+
+    return c.json({
+      success: true,
+      data: {
+        fromToken, toToken,
+        amountIn,
+        amountOut,
+        minOut,
+        priceImpact,
+        rate: `1 ${fromToken} = ${(effectiveFromUsd / toUsd).toFixed(6)} ${toToken}`,
+        source: "PancakeSwap V2 (internal execution)",
+      },
+    });
+  }
+);
+
 export default wallet;
 
 /* ─── GET /deposit/networks/:asset ─────────────────────────────────────── */

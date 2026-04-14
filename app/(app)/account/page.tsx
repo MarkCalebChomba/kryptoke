@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth, useAppStore } from "@/lib/store";
 import { useToastActions } from "@/components/shared/ToastContainer";
 import { BottomSheet } from "@/components/shared/BottomSheet";
@@ -11,7 +12,7 @@ import {
   TotpSetupSheet, TotpDisableSheet, PhoneUpdateSheet,
   AntiPhishingSheet, LoginActivitySheet, KycSheet, WhitelistSheet,
 } from "@/components/shared/SecuritySheets";
-import { apiPatch, apiPost } from "@/lib/api/client";
+import { apiPatch, apiPost, apiGet } from "@/lib/api/client";
 import { getUserInitials, maskPhone } from "@/lib/utils/formatters";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -206,6 +207,8 @@ export default function AccountPage() {
   const toast = useToastActions();
   const { user, clearAuth } = useAuth();
   const clearStore = useAppStore((s) => s.clearAuth);
+  const updateUser = useAppStore((s) => s.updateUser);
+  const qc = useQueryClient();
 
   const defaultTab = (searchParams.get("tab") ?? "profile") as "profile" | "security" | "preferences";
   const [activeTab, setActiveTab] = useState<"profile" | "security" | "preferences">(defaultTab);
@@ -228,6 +231,53 @@ export default function AccountPage() {
   function showRoadmap(title: string, description: string, eta?: string) {
     setRoadmap({ open: true, title, description, eta });
   }
+
+  /* ── Theme (localStorage, applied to <html>) ──────────────────────────── */
+  const [theme, setTheme] = useState<"dark" | "light" | "system">(() => {
+    if (typeof window === "undefined") return "dark";
+    return (localStorage.getItem("_kk_theme") as "dark" | "light" | "system") ?? "dark";
+  });
+  function applyTheme(next: "dark" | "light" | "system") {
+    setTheme(next);
+    localStorage.setItem("_kk_theme", next);
+    const html = document.documentElement;
+    if (next === "light") { html.classList.remove("dark"); html.classList.add("light"); }
+    else if (next === "dark") { html.classList.remove("light"); html.classList.add("dark"); }
+    else {
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      html.classList.toggle("dark", prefersDark);
+      html.classList.toggle("light", !prefersDark);
+    }
+  }
+
+  /* ── Language (saved to profile via PATCH /auth/profile) ─────────────── */
+  const [langSaving, setLangSaving] = useState(false);
+  async function saveLanguage(lang: "en" | "sw") {
+    if (lang === user?.language) return;
+    setLangSaving(true);
+    try {
+      await apiPatch("/auth/profile", { language: lang });
+      updateUser({ language: lang });
+      toast.success("Language preference saved");
+    } catch { toast.error("Could not save language"); }
+    finally { setLangSaving(false); }
+  }
+
+  /* ── Notification preferences ─────────────────────────────────────────── */
+  const { data: notifPrefsData } = useQuery({
+    queryKey: ["account", "notif-prefs"],
+    queryFn: () => apiGet<{ data: Record<string, boolean> }>("/account/notification-preferences"),
+    staleTime: 30_000,
+    enabled: activeTab === "preferences",
+  });
+  const notifPrefs = notifPrefsData?.data ?? {};
+
+  const toggleNotifPref = useMutation({
+    mutationFn: (update: Record<string, boolean>) =>
+      apiPatch("/account/notification-preferences", update),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["account", "notif-prefs"] }),
+    onError: () => toast.error("Could not save preference"),
+  });
 
   function copyUid() {
     navigator.clipboard.writeText(user?.uid ?? "");
@@ -369,7 +419,7 @@ export default function AccountPage() {
             {[
               {
                 icon: IconHelp, label: "Get Help",
-                action: () => showRoadmap("Live Support", "24/7 live chat and email support is coming soon. For now, check the FAQ or reach us on Telegram.", "Q3 2025"),
+                action: () => router.push("/support"),
               },
               {
                 icon: IconChart, label: "Demo Trade",
@@ -407,8 +457,7 @@ export default function AccountPage() {
             />
             <SettingRow
               icon={IconApi} label="API Access"
-              onClick={() => showRoadmap("API Access", "Integrate KryptoKe with your own trading bots using our REST API. Full documentation coming soon.", "Q1 2026")}
-              badge="SOON"
+              onClick={() => router.push("/account/api")}
             />
             <SettingRow icon={IconHelp} label="FAQ" onClick={() => router.push("/faq")} />
             <SettingRow icon={IconHelp} label="About KryptoKe" onClick={() => router.push("/about")} />
@@ -513,23 +562,108 @@ export default function AccountPage() {
       {/* ── Preferences tab ─────────────────────────────────────────────────── */}
       {activeTab === "preferences" && (
         <div className="divide-y divide-border/50">
+
+          {/* Language */}
+          <div className="px-4 py-3.5">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-xl bg-bg-surface2 border border-border flex items-center justify-center flex-shrink-0">
+                <IconGlobe size={15} className="text-text-secondary" />
+              </div>
+              <span className="flex-1 font-outfit text-sm text-text-primary">Language</span>
+              {langSaving && <span className="font-outfit text-[10px] text-text-muted">Saving…</span>}
+            </div>
+            <div className="flex gap-2 ml-11">
+              {(["en", "sw"] as const).map((lang) => (
+                <button key={lang} onClick={() => saveLanguage(lang)}
+                  className={cn(
+                    "flex-1 py-2 rounded-xl border font-outfit text-xs font-semibold transition-all",
+                    user?.language === lang
+                      ? "bg-primary/15 border-primary/40 text-primary"
+                      : "border-border text-text-muted"
+                  )}>
+                  {lang === "en" ? "English" : "Swahili"}
+                </button>
+              ))}
+            </div>
+            {user?.language === "sw" && (
+              <p className="font-outfit text-[10px] text-text-muted mt-2 ml-11">
+                Kiswahili interface coming in Q4 2025 — preference saved ✓
+              </p>
+            )}
+          </div>
+
+          {/* Appearance / Theme */}
+          <div className="px-4 py-3.5">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-xl bg-bg-surface2 border border-border flex items-center justify-center flex-shrink-0">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1.75"/>
+                  <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                    stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
+                </svg>
+              </div>
+              <span className="flex-1 font-outfit text-sm text-text-primary">Appearance</span>
+              <span className="font-outfit text-sm text-text-muted capitalize">{theme}</span>
+            </div>
+            <div className="flex gap-2 ml-11">
+              {(["dark", "light", "system"] as const).map((t) => (
+                <button key={t} onClick={() => applyTheme(t)}
+                  className={cn(
+                    "flex-1 py-2 rounded-xl border font-outfit text-xs font-semibold capitalize transition-all",
+                    theme === t
+                      ? "bg-primary/15 border-primary/40 text-primary"
+                      : "border-border text-text-muted"
+                  )}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Notification preferences */}
+          <div className="px-4 py-3.5">
+            <p className="font-outfit text-sm text-text-primary mb-3">Notifications</p>
+            <div className="space-y-3">
+              {[
+                { key: "email",    label: "Email notifications",    desc: "Deposits, withdrawals, security alerts" },
+                { key: "sms",      label: "SMS notifications",       desc: "Deposit confirmed, withdrawal sent" },
+                { key: "push",     label: "Push notifications",      desc: "Price alerts, order fills" },
+              ].map(({ key, label, desc }) => {
+                const enabled = notifPrefs[key] !== false;
+                return (
+                  <div key={key} className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-outfit text-sm text-text-primary">{label}</p>
+                      <p className="font-outfit text-[10px] text-text-muted">{desc}</p>
+                    </div>
+                    <button
+                      onClick={() => toggleNotifPref.mutate({ [key]: !enabled })}
+                      disabled={toggleNotifPref.isPending}
+                      className={cn(
+                        "relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0",
+                        enabled ? "bg-primary" : "bg-border-2"
+                      )}
+                      aria-label={`Toggle ${label}`}
+                    >
+                      <span className={cn(
+                        "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-200",
+                        enabled ? "left-5" : "left-0.5"
+                      )} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* API Access — link to dedicated page */}
           <SettingRow
-            icon={IconGlobe} label="Language"
-            value={user.language === "sw" ? "Swahili" : "English"}
-            onClick={() => showRoadmap("Language", "Switch between English and Swahili. Kiswahili interface coming soon.", "Q4 2025")}
+            icon={IconApi}
+            label="API Access"
+            value="Manage keys"
+            onClick={() => router.push("/account/api")}
           />
-          <SettingRow
-            label="Currency" value="KES"
-            onClick={() => showRoadmap("Currency Display", "Choose whether values display in KES, USD, or both.", "Q4 2025")}
-          />
-          <SettingRow
-            label="Appearance" value="Dark"
-            onClick={() => showRoadmap("Appearance", "Light mode and system-default theme options coming soon.", "Q4 2025")}
-          />
-          <SettingRow
-            label="Notifications"
-            onClick={() => showRoadmap("Notifications", "Manage push, email, and SMS notification preferences per event type.", "Q3 2025")}
-          />
+
           <SettingRow label="Privacy Policy" onClick={() => router.push("/privacy")} />
           <SettingRow label="Terms of Use"   onClick={() => router.push("/terms")}   />
         </div>

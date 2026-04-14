@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { authMiddleware } from "@/server/middleware/auth";
-import { withApiRateLimit } from "@/server/middleware/ratelimit";
+import { withApiRateLimit, withSensitiveRateLimit } from "@/server/middleware/ratelimit";
 import { getDb } from "@/server/db/client";
 import { getBalance, upsertBalance, createLedgerEntry } from "@/server/db/balances";
 import { add, subtract, lt } from "@/lib/utils/money";
@@ -486,6 +486,70 @@ account.post("/kyc/submit-documents", authMiddleware, async (c) => {
   if (error) return c.json({ success: false, error: error.message }, 400);
 
   return c.json({ success: true, message: "Documents submitted for review." });
+});
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   API KEYS
+══════════════════════════════════════════════════════════════════════════ */
+
+account.get("/api-keys", async (c) => {
+  const uid = c.get("uid") as string;
+  const db  = getDb();
+  const { data } = await db
+    .from("api_keys")
+    .select("id, label, key_prefix, permissions, last_used_at, created_at")
+    .eq("uid", uid)
+    .order("created_at", { ascending: false });
+  return c.json({ success: true, data: data ?? [] });
+});
+
+account.post(
+  "/api-keys",
+  withSensitiveRateLimit(),
+  zValidator("json", z.object({
+    label:       z.string().min(1).max(50),
+    permissions: z.array(z.enum(["read", "trade", "withdraw"])).min(1).default(["read"]),
+  })),
+  async (c) => {
+    const uid  = c.get("uid") as string;
+    const body = c.req.valid("json");
+    const db   = getDb();
+
+    // Max 10 active API keys per user
+    const { count } = await db
+      .from("api_keys")
+      .select("id", { count: "exact", head: true })
+      .eq("uid", uid);
+    if ((count ?? 0) >= 10) {
+      return c.json({ success: false, error: "Maximum 10 API keys allowed." }, 400);
+    }
+
+    // Generate a random key: kk_live_<32 hex chars>
+    const crypto = await import("crypto");
+    const rawKey   = `kk_live_${crypto.randomBytes(20).toString("hex")}`;
+    const keyHash  = crypto.createHash("sha256").update(rawKey).digest("hex");
+    const keyPrefix = rawKey.slice(0, 15); // "kk_live_XXXXXXX" — shown in list
+
+    const { data, error } = await db
+      .from("api_keys")
+      .insert({ uid, label: body.label, key_hash: keyHash, key_prefix: keyPrefix, permissions: body.permissions })
+      .select("id, label, key_prefix, permissions, created_at")
+      .single();
+
+    if (error || !data) return c.json({ success: false, error: "Failed to create key." }, 500);
+
+    // Return full key ONCE — never stored in plain text
+    return c.json({ success: true, data: { ...data, key: rawKey } }, 201);
+  }
+);
+
+account.delete("/api-keys/:id", async (c) => {
+  const uid = c.get("uid") as string;
+  const id  = c.req.param("id");
+  const db  = getDb();
+  await db.from("api_keys").delete().eq("id", id).eq("uid", uid);
+  return c.json({ success: true });
 });
 
 export default account;

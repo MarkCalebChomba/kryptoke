@@ -44,6 +44,20 @@
 
 /* ─── CSS Custom Properties ─────────────────────────────────────────────── */
 :root {
+
+/* ─── Light mode theme overrides ─────────────────────────────────────────── */
+html.light {
+  --color-bg:           #F4F7FF;
+  --color-bg-surface:   #FFFFFF;
+  --color-bg-surface2:  #EEF2FA;
+
+  --color-border:       #D8E0F0;
+  --color-border-2:     #C4CEEA;
+
+  --color-text-primary:   #0D1526;
+  --color-text-secondary: #3D506E;
+  --color-text-muted:     #7A8FAD;
+}
   /* Gradients */
   --gradient-brand: linear-gradient(135deg, #00E5B4 0%, #F0B429 100%);
 

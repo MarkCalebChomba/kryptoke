@@ -69,9 +69,12 @@ export function useRealtimeBalances() {
   const user = useAppStore((s) => s.user);
   const setBalance = useAppStore((s) => s.setBalance);
   const addNotification = useAppStore((s) => s.addNotification);
+  const addToast = useAppStore((s) => s.addToast);
   const queryClient = useQueryClient();
   const balanceChannelRef = useRef<RealtimeChannel | null>(null);
   const notifChannelRef = useRef<RealtimeChannel | null>(null);
+  // Track previous KKE balance to detect first-ever airdrop
+  const prevKkeRef = useRef<string>("0");
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -93,9 +96,24 @@ export function useRealtimeBalances() {
         },
         (payload: { new: BalanceRow }) => {
           const row = payload.new;
-          // Only update funding account balances in the store
-          // (trading/earn shown on assets page, fetched separately)
           if (row.account === "funding") {
+            // Detect KKE going from 0 → positive (welcome airdrop or admin airdrop)
+            if (
+              row.asset === "KKE" &&
+              parseFloat(prevKkeRef.current) === 0 &&
+              parseFloat(row.amount) > 0
+            ) {
+              addToast({
+                type: "airdrop",
+                title: `🪙 You received ${parseFloat(row.amount).toLocaleString()} KKE!`,
+                description: "KryptoKe tokens have been added to your wallet.",
+                duration: 6000,
+              });
+            }
+            if (row.asset === "KKE") {
+              prevKkeRef.current = row.amount;
+            }
+
             setBalance(row.asset, {
               asset: row.asset,
               amount: row.amount,
@@ -103,13 +121,11 @@ export function useRealtimeBalances() {
               updatedAt: row.updated_at,
             });
           }
-          // Always invalidate wallet query so all pages get fresh data
           queryClient.invalidateQueries({ queryKey: ["wallet"] });
         }
       )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR") {
-          // Reconnect after 5s
           setTimeout(() => {
             supabase.removeChannel(balanceChannel);
             balanceChannelRef.current = null;
@@ -119,7 +135,7 @@ export function useRealtimeBalances() {
 
     balanceChannelRef.current = balanceChannel;
 
-    // ── Incoming notifications (transfer received, deposit confirmed, etc.) ──
+    // ── Incoming notifications ────────────────────────────────────────────────
     const notifChannel = supabase
       .channel(`notifications:${uid}`)
       .on(
@@ -143,6 +159,16 @@ export function useRealtimeBalances() {
             data: (row.data as Record<string, unknown>) ?? {},
             createdAt: row.created_at,
           });
+
+          // Special handling for airdrop notifications — fire gold toast + confetti
+          if (row.type === "airdrop") {
+            addToast({
+              type: "airdrop",
+              title: row.title,
+              description: row.body,
+              duration: 6000,
+            });
+          }
         }
       )
       .subscribe();
@@ -155,5 +181,5 @@ export function useRealtimeBalances() {
       balanceChannelRef.current = null;
       notifChannelRef.current = null;
     };
-  }, [user?.uid, setBalance, addNotification, queryClient]);
+  }, [user?.uid, setBalance, addNotification, addToast, queryClient]);
 }

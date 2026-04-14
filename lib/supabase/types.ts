@@ -483,6 +483,29 @@ export interface Database {
         };
       };
 
+      api_keys: {
+        Row: {
+          id: string;
+          uid: string;
+          label: string;
+          key_hash: string;
+          key_prefix: string;
+          permissions: string[];
+          last_used_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          uid: string;
+          label: string;
+          key_hash: string;
+          key_prefix: string;
+          permissions?: string[];
+        };
+        Update: {
+          last_used_at?: string;
+        };
+      };
+
       announcements: {
         Row: {
           id: string;

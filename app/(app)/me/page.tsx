@@ -335,6 +335,7 @@ export default function WalletPage() {
             const isKke = symbol === "KKE";
             const dir = parseFloat(change) > 0 ? "up" : parseFloat(change) < 0 ? "down" : "flat";
             const kesVal = usdValue * kesPerUsd;
+            const isKke = symbol === "KKE";
             return (
               <button key={symbol}
                 onClick={() => symbol !== "KES" && !isKke && router.push(`/markets/${symbol}`)}

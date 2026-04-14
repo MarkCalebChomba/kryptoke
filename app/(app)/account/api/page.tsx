@@ -39,7 +39,7 @@ function CreateKeySheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => v
   const [copied, setCopied]       = useState<"key" | "secret" | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: () => apiPost<{ key: string; secret: string }>("/auth/api-keys", {
+    mutationFn: () => apiPost<{ key: string; secret: string }>("/account/api-keys", {
       label,
       permissions: perms,
       ipWhitelist: ipLimit ? ips.split("\n").map(s => s.trim()).filter(Boolean) : null,
@@ -179,7 +179,7 @@ function KeyRow({ apiKey, onDelete }: { apiKey: ApiKey; onDelete: () => void }) 
   const toast = useToastActions();
 
   const toggleMutation = useMutation({
-    mutationFn: () => apiPatch(`/auth/api-keys/${apiKey.id}`, { is_active: !apiKey.is_active }),
+    mutationFn: () => apiPatch(`/account/api-keys/${apiKey.id}`, { is_active: !apiKey.is_active }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["api-keys"] }),
   });
 
@@ -230,14 +230,14 @@ export default function ApiManagementPage() {
 
   const { data: keysData, isLoading } = useQuery({
     queryKey: ["api-keys"],
-    queryFn: () => apiGet<{ data: ApiKey[] }>("/auth/api-keys"),
+    queryFn: () => apiGet<{ data: ApiKey[] }>("/account/api-keys"),
     staleTime: 30_000,
   });
 
   const keys = keysData?.data ?? [];
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => apiDelete(`/auth/api-keys/${id}`),
+    mutationFn: (id: string) => apiDelete(`/account/api-keys/${id}`),
     onSuccess: () => { toast.success("API key deleted"); qc.invalidateQueries({ queryKey: ["api-keys"] }); },
     onError: () => toast.error("Failed to delete key"),
   });
