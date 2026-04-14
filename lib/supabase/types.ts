@@ -684,6 +684,111 @@ export interface Database {
           label?: string;
         };
       };
+      futures_positions: {
+        Row: {
+          id: string;
+          uid: string;
+          symbol: string;
+          side: "long" | "short";
+          status: "open" | "closed" | "liquidated" | "pending_limit";
+          leverage: number;
+          margin: string;
+          notional: string;
+          quantity: string;
+          entry_price: string;
+          mark_price: string | null;
+          liquidation_price: string;
+          take_profit: string | null;
+          stop_loss: string | null;
+          realised_pnl: string;
+          funding_paid: string;
+          opened_at: string;
+          closed_at: string | null;
+          close_price: string | null;
+          close_reason: "manual" | "liquidation" | "take_profit" | "stop_loss" | null;
+          margin_mode: "isolated" | "cross";
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          symbol: string;
+          side: "long" | "short";
+          status?: "open" | "closed" | "liquidated" | "pending_limit";
+          leverage?: number;
+          margin: string | number;
+          notional: string | number;
+          quantity: string | number;
+          entry_price: string | number;
+          mark_price?: string | number | null;
+          liquidation_price: string | number;
+          take_profit?: string | number | null;
+          stop_loss?: string | number | null;
+          realised_pnl?: string | number;
+          funding_paid?: string | number;
+          opened_at?: string;
+          closed_at?: string | null;
+          close_price?: string | number | null;
+          close_reason?: "manual" | "liquidation" | "take_profit" | "stop_loss" | null;
+          margin_mode?: "isolated" | "cross";
+          updated_at?: string;
+        };
+        Update: {
+          status?: "open" | "closed" | "liquidated" | "pending_limit";
+          mark_price?: string | number | null;
+          take_profit?: string | number | null;
+          stop_loss?: string | number | null;
+          realised_pnl?: string | number;
+          funding_paid?: string | number;
+          closed_at?: string | null;
+          close_price?: string | number | null;
+          close_reason?: "manual" | "liquidation" | "take_profit" | "stop_loss" | null;
+          margin_mode?: "isolated" | "cross";
+          updated_at?: string;
+        };
+      };
+      futures_orders: {
+        Row: {
+          id: string;
+          uid: string;
+          symbol: string;
+          side: "long" | "short";
+          order_type: "market" | "limit" | "stop_market" | "stop_limit";
+          status: "open" | "filled" | "cancelled" | "rejected";
+          leverage: number;
+          margin: string;
+          trigger_price: string | null;
+          take_profit: string | null;
+          stop_loss: string | null;
+          filled_price: string | null;
+          created_at: string;
+          filled_at: string | null;
+          position_id: string | null;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          symbol: string;
+          side: "long" | "short";
+          order_type: "market" | "limit" | "stop_market" | "stop_limit";
+          status?: "open" | "filled" | "cancelled" | "rejected";
+          leverage?: number;
+          margin: string | number;
+          trigger_price?: string | number | null;
+          take_profit?: string | number | null;
+          stop_loss?: string | number | null;
+          filled_price?: string | number | null;
+          created_at?: string;
+          filled_at?: string | null;
+          position_id?: string | null;
+        };
+        Update: {
+          status?: "open" | "filled" | "cancelled" | "rejected";
+          filled_price?: string | number | null;
+          filled_at?: string | null;
+          position_id?: string | null;
+        };
+      };
       compliance_alerts: {
         Row: {
           id: string;
