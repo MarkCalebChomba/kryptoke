@@ -500,6 +500,29 @@ Update this section when you complete or start a task. Format:
     auth.ts:  +150 XP to referrer on referee registration
   REQUIRES: Apply migration 017_gamification.sql to Supabase
 
+[FORGE] 2026-04-14 Wave 3+4 F-D DONE — Futures complete overhaul.
+  server/routes/futures.ts: MAX_LEVERAGE map, getMaxLeverage(), getMMR()
+    GET /futures/market-data: Binance Futures public API, 5s Redis cache
+    GET /futures/max-leverage: per-symbol max
+    /open: validates leverage, stores margin_mode, uses correct MMR in liqPrice
+  supabase/migrations/023_futures_rls_fix.sql: get_app_uid() RLS, margin_mode col, updated_at
+  components/trade/FuturesTab.tsx: full rebuild — stats bar, margin mode toggle,
+    order type tabs, leverage+margin sliders, TP/SL always visible, positions BottomSheet,
+    risk warning gate, live market data polling every 5s
+  app/(app)/trade/page.tsx: passes symbol + onSymbolChange to FuturesTab
+  REQUIRES: Apply migration 023_futures_rls_fix.sql to Supabase
+
+[FORGE] 2026-04-14 Wave 4 F-E DONE — Spot order form continuous slider.
+  components/trade/OrderForm.tsx: replaced 5 pct buttons with HTML range slider
+
+[FORGE] 2026-04-14 Wave 4 F-F DONE — Convert tab defaultFrom prop.
+  components/trade/ConvertTab.tsx: defaultFrom? prop, initialises from trade page symbol
+  app/(app)/trade/page.tsx: passes defaultFrom={symbol} to ConvertTab
+
+[FORGE] 2026-04-14 Wave 4 F-G DONE — Menu overhaul.
+  components/home/MenuSheet.tsx: Binance-style icon grid, user card with XP/level,
+    5 sections: Finance | Trade | Grow | Account | Support, all tiles navigate live
+
 # SHIELD STATUS
 [SHIELD] [2026-04-08] Task 8 DONE — Migration 012_rls_custom_jwt.sql: replaced all auth.uid() RLS policies with get_app_uid() that reads request.jwt.claims->>'uid'. Added .setSubject(uid) to JWT. PREREQ: Supabase JWT secret must match JWT_SECRET in Vercel env.
 [SHIELD] [2026-04-08] Task 9 DONE — transfer-to-user: added Redis advisory lock (prevents double-spend race), recipient wallet cache bust, in-app notification INSERT for recipient. Fixed P2PSheet canSend bug (was always checking usdtBalance even for KES transfers).
