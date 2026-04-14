@@ -60,6 +60,7 @@ export interface WalletInfo {
   bnbBalance: string;
   kesBalance: string;
   usdtBalance: string;
+  kkeBalance: string;
   kycStatus: User["kycStatus"];
 }
 

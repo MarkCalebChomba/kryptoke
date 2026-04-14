@@ -29,6 +29,7 @@ export function useWallet() {
         { asset: "KES", amount: query.data.kesBalance, account: "funding", updatedAt: new Date().toISOString() },
         { asset: "USDT", amount: query.data.usdtBalance, account: "funding", updatedAt: new Date().toISOString() },
         { asset: "BNB", amount: query.data.bnbBalance, account: "funding", updatedAt: new Date().toISOString() },
+        { asset: "KKE", amount: query.data.kkeBalance ?? "0", account: "funding", updatedAt: new Date().toISOString() },
       ]);
     }
   }, [query.data, setBalances, setRate]);
@@ -37,6 +38,7 @@ export function useWallet() {
   const kesBalance = query.data?.kesBalance ?? "0";
   const usdtBalance = query.data?.usdtBalance ?? "0";
   const bnbBalance = query.data?.bnbBalance ?? "0";
+  const kkeBalance = query.data?.kkeBalance ?? "0";
   const kesPerUsd = rate?.kesPerUsd ?? "130";
 
   const totalKes = portfolioValueKes(kesBalance, usdtBalance, kesPerUsd);
@@ -48,6 +50,7 @@ export function useWallet() {
     kesBalance,
     usdtBalance,
     bnbBalance,
+    kkeBalance,
     totalKes,
     totalUsd,
     usdtInKes,

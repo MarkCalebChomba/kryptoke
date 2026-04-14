@@ -56,14 +56,15 @@ function DonutChart({ slices }: { slices: { pct: number; color: string; label: s
 export default function AssetsPage() {
   const router = useRouter();
   const [depositOpen, setDepositOpen] = useState(false);
-  const { totalKes, totalUsd, kesBalance, usdtBalance, bnbBalance, rate, isLoading } = useWallet();
+  const { totalKes, totalUsd, kesBalance, usdtBalance, bnbBalance, kkeBalance, rate, isLoading } = useWallet();
   const { prices, priceChanges } = usePrices();
   const kesPerUsd = rate?.kesPerUsd ?? "130";
 
   const assets = [
-    { symbol: "KES",  name: "Kenyan Shilling", iconUrl: null, amount: kesBalance,  price: "1",                        change: "0" },
-    { symbol: "USDT", name: "Tether USD",       iconUrl: null, amount: usdtBalance, price: "1",                        change: priceChanges["USDTUSDT"] ?? "0" },
-    { symbol: "BNB",  name: "BNB",              iconUrl: null, amount: bnbBalance,  price: prices["BNBUSDT"] ?? "300", change: priceChanges["BNBUSDT"] ?? "0" },
+    { symbol: "KES",  name: "Kenyan Shilling",  iconUrl: null, amount: kesBalance,  price: "1",                        change: "0" },
+    { symbol: "USDT", name: "Tether USD",        iconUrl: null, amount: usdtBalance, price: "1",                        change: priceChanges["USDTUSDT"] ?? "0" },
+    { symbol: "BNB",  name: "BNB",               iconUrl: null, amount: bnbBalance,  price: prices["BNBUSDT"] ?? "300", change: priceChanges["BNBUSDT"] ?? "0" },
+    { symbol: "KKE",  name: "KryptoKe Token",    iconUrl: "/icon-192.png",  amount: kkeBalance,  price: "0",                        change: "0" },
   ].filter((a) => parseFloat(a.amount) > 0);
 
   // Compute USD values for donut

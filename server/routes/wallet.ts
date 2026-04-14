@@ -60,6 +60,10 @@ wallet.get("/info", async (c) => {
     (b) => b.asset === "USDT" && b.account === "funding"
   )?.amount ?? "0";
 
+  const kkeBalance = balanceRows.find(
+    (b) => b.asset === "KKE" && b.account === "funding"
+  )?.amount ?? "0";
+
   // All account balances grouped: { funding: { USDT: "x", KES: "y" }, trading: { USDT: "z" }, earn: { USDT: "q" } }
   const accountBalances: Record<string, Record<string, string>> = {};
   for (const b of balanceRows) {
@@ -72,6 +76,7 @@ wallet.get("/info", async (c) => {
     bnbBalance,
     kesBalance,
     usdtBalance,
+    kkeBalance,
     kycStatus: userRow.kyc_status,
   };
 

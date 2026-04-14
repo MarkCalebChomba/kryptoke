@@ -332,27 +332,47 @@ export default function WalletPage() {
           </div>
         ) : (
           assets.map(({ symbol, amount, usdValue, change }) => {
+            const isKke = symbol === "KKE";
             const dir = parseFloat(change) > 0 ? "up" : parseFloat(change) < 0 ? "down" : "flat";
             const kesVal = usdValue * kesPerUsd;
             return (
               <button key={symbol}
-                onClick={() => symbol !== "KES" && router.push(`/markets/${symbol}`)}
-                className="flex items-center gap-3 px-4 py-3 w-full active:bg-bg-surface2 transition-colors">
-                {/* Icon placeholder */}
-                <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-                  <span className="font-price text-[10px] font-bold text-primary">{symbol.slice(0, 3)}</span>
+                onClick={() => symbol !== "KES" && !isKke && router.push(`/markets/${symbol}`)}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3 w-full active:bg-bg-surface2 transition-colors",
+                  isKke && "border-l-2 border-gold/50 bg-gold/5"
+                )}>
+                {/* Icon */}
+                <div className={cn(
+                  "w-9 h-9 rounded-full border flex items-center justify-center flex-shrink-0",
+                  isKke ? "bg-gold/20 border-gold/40" : "bg-primary/10 border-primary/20"
+                )}>
+                  {isKke
+                    ? <img src="/icon-192.png" alt="KKE" className="w-6 h-6 rounded-full object-cover" />
+                    : <span className="font-price text-[10px] font-bold text-primary">{symbol.slice(0, 3)}</span>
+                  }
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="font-outfit font-semibold text-sm text-text-primary">{symbol}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-outfit font-semibold text-sm text-text-primary">{symbol}</p>
+                    {isKke && (
+                      <span className="font-outfit text-[9px] font-bold px-1 py-0.5 rounded bg-gold/20 text-gold border border-gold/30 uppercase tracking-wide">
+                        Exchange Token
+                      </span>
+                    )}
+                  </div>
                   <p className="font-outfit text-[10px] text-text-muted">
-                    {parseFloat(amount) < 0.0001 ? parseFloat(amount).toExponential(2) : parseFloat(amount).toFixed(6)} {symbol}
+                    {parseFloat(amount) < 0.0001 ? parseFloat(amount).toExponential(2) : parseFloat(amount).toFixed(isKke ? 2 : 6)} {symbol}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="font-price text-sm text-text-primary">
-                    {hidden ? "••••" : `KSh ${kesVal.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`}
+                    {isKke
+                      ? <span className="text-gold">{hidden ? "••••" : `${parseFloat(amount).toFixed(2)} KKE`}</span>
+                      : hidden ? "••••" : `KSh ${kesVal.toLocaleString("en-KE", { maximumFractionDigits: 0 })}`
+                    }
                   </p>
-                  {symbol !== "KES" && (
+                  {!isKke && symbol !== "KES" && (
                     <span className={cn(
                       "inline-block font-price text-[10px] font-semibold px-1.5 py-0.5 rounded-lg mt-0.5",
                       dir === "up" ? "bg-up/20 text-up" : dir === "down" ? "bg-down/20 text-down" : "bg-bg-surface2 text-text-muted"
