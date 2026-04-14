@@ -408,6 +408,42 @@ Update this section when you complete or start a task. Format:
   REQUIRES: Apply migrations 013, 015, 018 to Supabase before deploying.
   To populate blocklist after migration 018: POST /api/v1/cron/sync-blocklist
 
+[NEXUS] 2026-04-14 Wave 4 Step 1 DONE — Mount missing routes.
+  server/index.ts: imported and mounted p2p, referral, rewards, account routes.
+  These were returning 404 for all users. Fixed in a single commit.
+
+[NEXUS] 2026-04-14 Wave 4 Step 2 DONE — N-C rewards route hardened.
+  server/routes/rewards.ts rewritten:
+  1. 24h guard: daily_login queries ledger_entries gte(now-24h). Returns 400 if found.
+  2. Kill switch: reads system_config rewards_enabled. USDT only when value = 'true'.
+  3. Budget cap: reads rewards_budget_remaining_usdt. Deducts on claim.
+     If pool empty: awards XP only, marks claimed, no user-facing error about budget.
+  4. All USDT reward amounts = "0" — XP values set (10–500 per task).
+     USDT activates when admin runs: UPDATE system_config SET value='true'
+     WHERE key='rewards_enabled', and funds the pool.
+  5. Added GET /rewards/summary — poolEnabled, poolFunded, totalClaimedUsdt.
+  6. p2p_orders completion check added for first_p2p task.
+  To enable USDT rewards: set rewards_enabled='true' and fund rewards_budget_remaining_usdt.
+
+[NEXUS] 2026-04-14 Wave 4 Step 7 DONE — N-D KKE token + airdrop system.
+  supabase/migrations/021_kke_token.sql:
+    KKE token in tokens table: 1B supply, INTERNAL chain, is_native_token=true
+    token_chain_freeze: KKE deposits+withdrawals frozen (internal-only at launch)
+    system_config seeds: rewards_enabled, rewards_budget_remaining_usdt, kke_welcome_bonus
+  supabase/migrations/022_airdrops.sql:
+    airdrops table with admin-only RLS
+  server/services/airdrop.ts:
+    creditKkeWelcomeBonus(uid): idempotent, reads amount from system_config,
+      awards 50 XP + in-app notification, records in airdrops table
+    executeAirdrop(opts): bulk airdrop to segments (all/kyc_verified/new_users_7d/single),
+      batches of 50, idempotent per airdropId, sends in-app notifications
+  server/routes/auth.ts: fire-and-forget creditKkeWelcomeBonus on registration
+  server/routes/admin/index.ts:
+    POST /admin/airdrop — execute bulk airdrop (validates, blocks USDT to all)
+    GET  /admin/airdrops — last 50 airdrop events
+    GET  /admin/kke/stats — totalSupply, circulatingSupply, last 5 KKE airdrops
+  REQUIRES: Apply migrations 021 + 022 to Supabase before deploying.
+
 # FORGE STATUS
 [FORGE] 2026-04-08 Task 5 DONE — Spot trading live on Binance/Gate.io/Bybit.
   server/services/exchange.ts — added full spot layer:
