@@ -10,9 +10,90 @@ import { Notifications } from "@/server/services/notifications";
 import { redis } from "@/lib/redis/client";
 import type { Context } from "hono";
 
+// ── Max leverage per symbol (Binance standard tiers) ─────────────────────────
+
+const MAX_LEVERAGE: Record<string, number> = {
+  BTC: 125, ETH: 100, BNB: 75, SOL: 75, XRP: 75,
+  ADA: 75, DOGE: 75, AVAX: 50, LINK: 50, DOT: 50,
+  DEFAULT: 50,
+};
+
+export function getMaxLeverage(symbol: string): number {
+  return MAX_LEVERAGE[symbol.toUpperCase()] ?? MAX_LEVERAGE.DEFAULT!;
+}
+
+// ── Maintenance margin rates (Binance simplified) ─────────────────────────────
+
+const MMR: Record<string, number> = {
+  BTC: 0.004, ETH: 0.004, DEFAULT: 0.005,
+};
+
+export function getMMR(symbol: string): number {
+  return MMR[symbol.toUpperCase()] ?? MMR.DEFAULT!;
+}
+
 const futures = new Hono();
 futures.use("*", authMiddleware);
 futures.use("*", withApiRateLimit());
+
+/* ─── GET /market-data?symbol=BTC ───────────────────────────────────────── */
+
+futures.get("/market-data", async (c) => {
+  const raw = c.req.query("symbol") ?? "BTC";
+  const symbol = raw.toUpperCase().replace("USDT", "");
+  const cacheKey = `futures:mkt:${symbol}`;
+
+  const cached = await redis.get(cacheKey).catch(() => null);
+  if (cached) {
+    return c.json({ success: true, data: cached });
+  }
+
+  try {
+    const sym = `${symbol}USDT`;
+    const [premiumRes, oiRes, tickerRes] = await Promise.allSettled([
+      fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${sym}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+      fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${sym}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+      fetch(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${sym}`, { signal: AbortSignal.timeout(5000) }).then(r => r.json()),
+    ]);
+
+    const premium = premiumRes.status === "fulfilled" ? premiumRes.value as {
+      markPrice: string; indexPrice: string; lastFundingRate: string; nextFundingTime: number;
+    } : null;
+    const oi     = oiRes.status     === "fulfilled" ? oiRes.value     as { openInterest: string } : null;
+    const ticker = tickerRes.status === "fulfilled" ? tickerRes.value as {
+      quoteVolume: string; priceChangePercent: string;
+    } : null;
+
+    const now = Date.now();
+    const fundingCountdownSeconds = premium?.nextFundingTime
+      ? Math.max(0, Math.floor((premium.nextFundingTime - now) / 1000))
+      : 0;
+
+    const data = {
+      markPrice:               premium?.markPrice    ?? "0",
+      indexPrice:              premium?.indexPrice   ?? "0",
+      fundingRate:             premium?.lastFundingRate ?? "0",
+      fundingCountdownSeconds,
+      openInterest:            oi?.openInterest      ?? "0",
+      volume24h:               ticker?.quoteVolume   ?? "0",
+      change24h:               ticker?.priceChangePercent ?? "0",
+    };
+
+    await redis.set(cacheKey, data, { ex: 5 }).catch(() => undefined);
+    return c.json({ success: true, data });
+  } catch (e) {
+    return c.json({ success: false, error: (e as Error).message, statusCode: 503 }, 503);
+  }
+});
+
+/* ─── GET /max-leverage?symbol=BTC ─────────────────────────────────────── */
+
+futures.get("/max-leverage", (c) => {
+  const symbol = (c.req.query("symbol") ?? "BTC").toUpperCase().replace("USDT", "");
+  return c.json({ success: true, data: { symbol, maxLeverage: getMaxLeverage(symbol) } });
+});
+
+
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
@@ -33,14 +114,14 @@ async function getMarkPrice(symbol: string): Promise<string> {
 }
 
 /** Calculate liquidation price */
-function calcLiqPrice(side: "long" | "short", entryPrice: string, leverage: number): string {
+function calcLiqPrice(side: "long" | "short", entryPrice: string, leverage: number, symbol: string, marginMode: "isolated" | "cross"): string {
+  if (marginMode === "cross") return "0"; // cross margin varies with account balance
   const entry = parseFloat(entryPrice);
-  // Simplified: liquidation at ~90% of margin consumed (maintenance margin 10%)
-  const maintenanceMarginRate = 0.1;
+  const mmr = getMMR(symbol.replace("USDT", ""));
   if (side === "long") {
-    return (entry * (1 - (1 / leverage) + maintenanceMarginRate)).toFixed(8);
+    return (entry * (1 - (1 / leverage) + mmr)).toFixed(8);
   } else {
-    return (entry * (1 + (1 / leverage) - maintenanceMarginRate)).toFixed(8);
+    return (entry * (1 + (1 / leverage) - mmr)).toFixed(8);
   }
 }
 
@@ -104,8 +185,9 @@ futures.post(
   zValidator("json", z.object({
     symbol:     z.string().min(2).max(20).toUpperCase(),
     side:       z.enum(["long", "short"]),
-    margin:     z.string().regex(/^\d+(\.\d+)?$/, "Invalid margin"),
-    leverage:   z.number().int().min(1).max(125),
+    margin:      z.string().regex(/^\d+(\.\d+)?$/, "Invalid margin"),
+    leverage:    z.number().int().min(1).max(125),
+    marginMode:  z.enum(["isolated", "cross"]).default("isolated"),
     takeProfit: z.string().optional(),
     stopLoss:   z.string().optional(),
     orderType:  z.enum(["market", "limit"]).default("market"),
@@ -113,8 +195,15 @@ futures.post(
   })),
   async (c) => {
     const { uid } = c.get("user");
-    const { symbol, side, margin, leverage, takeProfit, stopLoss, orderType, limitPrice } = c.req.valid("json");
+    const { symbol, side, margin, leverage, takeProfit, stopLoss, orderType, limitPrice, marginMode } = c.req.valid("json");
     const db = getDb();
+
+    // Validate leverage against per-symbol max
+    const cleanSymbol = symbol.toUpperCase().replace("USDT", "");
+    const maxLev = getMaxLeverage(cleanSymbol);
+    if (leverage > maxLev) {
+      return c.json({ success: false, error: `Max leverage for ${cleanSymbol} is ${maxLev}×`, statusCode: 400 }, 400);
+    }
 
     // Check trading balance
     const tradingBalance = await getBalance(uid, "USDT", "trading");
@@ -139,7 +228,7 @@ futures.post(
     const notional = multiply(margin, leverage.toString());
     // Quantity = notional / entryPrice
     const quantity = divide(notional, entryPrice);
-    const liqPrice = calcLiqPrice(side, entryPrice, leverage);
+    const liqPrice = calcLiqPrice(side, entryPrice, leverage, cleanSymbol, marginMode);
 
     // Deduct margin from trading balance immediately
     const newBalance = subtract(tradingBalance, margin);
@@ -161,6 +250,7 @@ futures.post(
         liquidation_price: liqPrice,
         take_profit: takeProfit ?? null,
         stop_loss: stopLoss ?? null,
+        margin_mode: marginMode,
         status: orderType === "limit" ? "pending_limit" : "open",
       })
       .select()

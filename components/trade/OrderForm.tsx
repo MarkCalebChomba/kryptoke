@@ -251,15 +251,25 @@ export function OrderForm({ symbol, tokenAddress, onDepositClick, externalPrice,
         </div>
       )}
 
-      {/* % quick-select row */}
-      <div className="flex gap-1">
-        {[0, 25, 50, 75, 100].map((pct) => (
-          <button key={pct} onClick={() => setSliderPct(pct)}
-            className={cn("flex-1 py-1 rounded font-outfit text-[10px] border transition-colors",
-              sliderPct === pct ? "border-primary/50 text-primary bg-primary/10" : "border-border text-text-muted")}>
-            {pct === 0 ? "0" : pct === 100 ? "Max" : `${pct}%`}
-          </button>
-        ))}
+      {/* Continuous % slider */}
+      <div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={sliderPct}
+          onChange={(e) => setSliderPct(Number(e.target.value))}
+          className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+          style={{
+            background: `linear-gradient(to right, var(--color-primary) ${sliderPct}%, var(--color-border) ${sliderPct}%)`,
+          }}
+        />
+        <div className="flex justify-between mt-1">
+          <span className="font-price text-[10px] text-text-muted">0%</span>
+          <span className="font-price text-[10px] text-primary font-bold">{sliderPct}%</span>
+          <span className="font-price text-[10px] text-text-muted">Max</span>
+        </div>
       </div>
 
       {/* Total + available row */}

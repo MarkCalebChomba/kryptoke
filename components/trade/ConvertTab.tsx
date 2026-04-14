@@ -112,9 +112,13 @@ function TokenSelector({ isOpen, onClose, onSelect, title, includeKes }: {
 }
 
 // ── Main ConvertTab ────────────────────────────────────────────────────────────
-export function ConvertTab() {
+export function ConvertTab({ defaultFrom }: { defaultFrom?: string }) {
   const toast = useToastActions();
-  const [fromCoin, setFromCoin] = useState<Coin>(USDT_TOKEN);
+  const [fromCoin, setFromCoin] = useState<Coin>(
+    defaultFrom && defaultFrom !== "USDT" && defaultFrom !== "KES"
+      ? { symbol: defaultFrom, name: defaultFrom, logo_url: "", price: "0", change_24h: "0" }
+      : USDT_TOKEN
+  );
   const [toCoin,   setToCoin]   = useState<Coin>(KES_TOKEN);
   const [amount,   setAmount]   = useState("0");
   const [fromOpen, setFromOpen] = useState(false);

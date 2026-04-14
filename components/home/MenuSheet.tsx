@@ -4,146 +4,133 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { BottomSheet } from "@/components/shared/BottomSheet";
 import { apiGet } from "@/lib/api/client";
-import {
-  IconWallet, IconHelp, IconInfo, IconChevronRight, IconProfile,
-  IconShield, IconChart,
-} from "@/components/icons";
 import { cn } from "@/lib/utils/cn";
-import type { Announcement } from "@/types";
 
-interface MenuItemProps {
-  icon: React.FC<{ size?: number; className?: string }>;
-  label: string;
-  sublabel?: string;
-  onClick: () => void;
-  badge?: string;
+interface MenuSheetProps { isOpen: boolean; onClose: () => void; }
+
+interface WalletInfo {
+  displayName?: string; uid?: string; kycStatus?: string;
+  level?: string; totalXp?: number;
 }
 
-function MenuItem({ icon: Icon, label, sublabel, onClick, badge }: MenuItemProps) {
+const LEVEL_COLORS: Record<string, string> = {
+  Bronze:"#CD7F32", Silver:"#C0C0C0", Gold:"#F0B429", Platinum:"#00E5B4", Diamond:"#60A5FA",
+};
+
+// ── Icon tiles ─────────────────────────────────────────────────────────────────
+
+interface TileProps { icon: string; label: string; onClick: () => void; dim?: boolean; }
+function Tile({ icon, label, onClick, dim }: TileProps) {
   return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-3 px-4 py-3.5 w-full active:bg-bg-surface2 transition-colors"
-    >
-      <div className="w-9 h-9 rounded-xl bg-bg-surface2 border border-border flex items-center justify-center flex-shrink-0">
-        <Icon size={18} className="text-text-secondary" />
-      </div>
-      <div className="flex-1 text-left">
-        <p className="font-outfit text-sm font-medium text-text-primary">{label}</p>
-        {sublabel && <p className="font-outfit text-xs text-text-muted">{sublabel}</p>}
-      </div>
-      {badge && (
-        <span className="bg-primary/10 text-primary font-outfit text-[10px] font-bold px-2 py-0.5 rounded mr-1">
-          {badge}
-        </span>
+    <button onClick={onClick}
+      className={cn(
+        "flex flex-col items-center gap-1.5 p-2 rounded-2xl border border-border bg-bg-surface",
+        "active:bg-bg-surface2 transition-colors",
+        dim && "opacity-50"
       )}
-      <IconChevronRight size={16} className="text-text-muted" />
+      style={{ width: "calc(25% - 6px)", minWidth: 68 }}>
+      <span className="text-2xl leading-none">{icon}</span>
+      <span className="font-outfit text-[10px] text-text-muted font-medium text-center leading-tight">{label}</span>
     </button>
   );
 }
 
-interface MenuSheetProps {
-  isOpen: boolean;
-  onClose: () => void;
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="font-outfit text-[10px] text-text-muted uppercase tracking-wider px-1 mb-2">{title}</p>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
+  );
 }
 
 export function MenuSheet({ isOpen, onClose }: MenuSheetProps) {
   const router = useRouter();
 
-  const { data: announcements } = useQuery({
-    queryKey: ["announcements"],
-    queryFn: () => apiGet<Announcement[]>("/market/announcements"),
+  const { data: wallet } = useQuery<WalletInfo>({
+    queryKey: ["wallet", "menu"],
+    queryFn: () => apiGet<WalletInfo>("/wallet/info"),
+    staleTime: 60_000,
     enabled: isOpen,
-    staleTime: 5 * 60_000,
   });
 
-  const unreadAnnouncements = (announcements ?? []).length;
+  const { data: gamify } = useQuery<{ level: string; totalXp: number }>({
+    queryKey: ["gamify", "me"],
+    queryFn: () => apiGet<{ level: string; totalXp: number }>("/gamify/me"),
+    staleTime: 60_000,
+    enabled: isOpen,
+  });
 
-  function navigate(path: string) {
-    onClose();
-    // Small delay so close animation completes before navigation
-    setTimeout(() => router.push(path), 100);
-  }
+  function go(path: string) { onClose(); router.push(path); }
+
+  const level = gamify?.level ?? "Bronze";
+  const levelColor = LEVEL_COLORS[level] ?? "#F0B429";
+  const uidShort = wallet?.uid ? `···${wallet.uid.slice(-6)}` : "";
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} title="Menu">
-      {/* Announcements */}
-      {unreadAnnouncements > 0 && (
-        <div className="mx-4 my-3">
-          {(announcements ?? []).slice(0, 2).map((a) => (
-            <div
-              key={a.id}
-              className={cn(
-                "flex items-start gap-2 p-3 rounded-xl mb-2 border",
-                a.type === "warning"
-                  ? "bg-gold/5 border-gold/20"
-                  : a.type === "promotion"
-                  ? "bg-primary/5 border-primary/20"
-                  : "bg-bg-surface2 border-border"
-              )}
-            >
-              <div className={cn(
-                "w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0",
-                a.type === "warning" ? "bg-gold" : a.type === "promotion" ? "bg-primary" : "bg-text-muted"
-              )} />
-              <div>
-                <p className="font-outfit text-sm font-medium text-text-primary">{a.title}</p>
-                <p className="font-outfit text-xs text-text-muted mt-0.5">{a.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+    <BottomSheet isOpen={isOpen} onClose={onClose} title="">
+      <div className="px-1 space-y-5 pb-6">
 
-      <div className="divide-y divide-border/50 pb-4">
-        <MenuItem
-          icon={IconWallet}
-          label="My Wallet"
-          sublabel="View all assets and balances"
-          onClick={() => navigate("/me")}
-        />
-        <MenuItem
-          icon={IconProfile}
-          label="Profile & Settings"
-          sublabel="Edit profile, security, preferences"
-          onClick={() => navigate("/account")}
-        />
-        <MenuItem
-          icon={IconShield}
-          label="Security"
-          sublabel="Password, PIN, and 2FA"
-          onClick={() => navigate("/account?tab=security")}
-        />
-        <MenuItem
-          icon={IconChart}
-          label="Analysis"
-          sublabel="PnL calendar and portfolio stats"
-          onClick={() => navigate("/analysis")}
-        />
-        <MenuItem
-          icon={IconHelp}
-          label="FAQ"
-          sublabel="Frequently asked questions"
-          onClick={() => navigate("/faq")}
-        />
-        <MenuItem
-          icon={IconInfo}
-          label="About KryptoKe"
-          sublabel={`v${process.env.NEXT_PUBLIC_APP_VERSION ?? "1.0.0"} · Built for Kenya`}
-          onClick={() => navigate("/about")}
-        />
-        <MenuItem
-          icon={IconHelp}
-          label="Terms of Use"
-          sublabel="Read our terms and conditions"
-          onClick={() => navigate("/terms")}
-        />
-        <MenuItem
-          icon={IconHelp}
-          label="Privacy Policy"
-          sublabel="How we protect your data"
-          onClick={() => navigate("/privacy")}
-        />
+        {/* User card */}
+        <div className="flex items-center gap-3 px-3 py-3 rounded-2xl bg-bg-surface2 border border-border">
+          <div className="w-12 h-12 rounded-2xl bg-primary/15 border border-primary/20 flex items-center justify-center text-xl flex-shrink-0">
+            {wallet?.displayName ? wallet.displayName[0]?.toUpperCase() : "👤"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-syne font-bold text-sm text-text-primary truncate">
+              {wallet?.displayName ?? "My Account"}
+            </p>
+            <p className="font-outfit text-[10px] text-text-muted">UID: {uidShort}</p>
+            {wallet?.kycStatus === "verified" && (
+              <span className="font-outfit text-[9px] bg-up/15 text-up px-1.5 py-0.5 rounded font-semibold">✓ Verified</span>
+            )}
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="font-price text-xs font-bold" style={{ color: levelColor }}>{level}</p>
+            <p className="font-outfit text-[10px] text-text-muted">{gamify?.totalXp?.toLocaleString() ?? "—"} XP</p>
+          </div>
+        </div>
+
+        {/* Finance */}
+        <Section title="Finance">
+          <Tile icon="💰" label="Deposit"  onClick={() => go("/deposit")} />
+          <Tile icon="📤" label="Withdraw" onClick={() => go("/withdraw")} />
+          <Tile icon="✈️" label="Transfer" onClick={() => go("/me")} />
+          <Tile icon="⇄"  label="Convert"  onClick={() => go("/convert")} />
+        </Section>
+
+        {/* Trade */}
+        <Section title="Trade">
+          <Tile icon="📈" label="Spot"    onClick={() => go("/trade?mode=Spot")} />
+          <Tile icon="⚡" label="Futures" onClick={() => go("/trade?mode=Futures")} />
+          <Tile icon="🤝" label="P2P"     onClick={() => go("/p2p")} />
+          <Tile icon="🔗" label="DEX"     onClick={() => go("/trade?mode=DEX")} />
+        </Section>
+
+        {/* Grow */}
+        <Section title="Grow">
+          <Tile icon="💎" label="Earn"        onClick={() => go("/earn")} />
+          <Tile icon="🏦" label="Loans"       onClick={() => go("/loans")} />
+          <Tile icon="🔄" label="Auto-Invest" onClick={() => go("/auto-invest")} />
+          <Tile icon="🤖" label="Bots"        onClick={() => go("/trade?mode=Bots")} />
+        </Section>
+
+        {/* Account */}
+        <Section title="Account">
+          <Tile icon="🎁" label="Rewards"  onClick={() => go("/rewards")} />
+          <Tile icon="👥" label="Referral" onClick={() => go("/referral")} />
+          <Tile icon="📊" label="Analysis" onClick={() => go("/analysis")} />
+          <Tile icon="🔑" label="API Keys" onClick={() => go("/account/api")} />
+        </Section>
+
+        {/* Support */}
+        <Section title="Support">
+          <Tile icon="❓" label="FAQ"       onClick={() => go("/about")} />
+          <Tile icon="💬" label="Live Chat" onClick={() => go("/support")} />
+          <Tile icon="ℹ️" label="About"     onClick={() => go("/about")} />
+          <Tile icon="⚙️" label="Settings"  onClick={() => go("/account")} />
+        </Section>
+
       </div>
     </BottomSheet>
   );

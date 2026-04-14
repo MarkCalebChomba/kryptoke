@@ -133,8 +133,8 @@ export default function TradePage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        {activeMode === "Convert" && <ConvertTab />}
-        {activeMode === "Futures" && <FuturesTab />}
+        {activeMode === "Convert" && <ConvertTab defaultFrom={symbol} />}
+        {activeMode === "Futures" && <FuturesTab symbol={symbol} onSymbolChange={(s) => handlePairChange(s, `${s}USDT`)} />}
 
         {activeMode === "Spot" && (
           <>
