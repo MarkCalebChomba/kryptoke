@@ -1222,3 +1222,418 @@ Subscribe to the `notifications` table via Supabase Realtime (already wired in `
 6. NEXUS: N-D (airdrop system)
 7. PULSE: P-A, P-B (international UX + P2P UI)
 8. PULSE: P-C (airdrop notification UX — depends on N-D)
+
+---
+
+## WAVE 4 — FINAL WAVE (2026-04-08)
+
+### ROOT CAUSE: 4 routes not mounted in server/index.ts
+
+**This is why the user cannot see P2P, Referral, Rewards, and Account changes.**
+`server/index.ts` is missing these four `app.route()` calls:
+```ts
+app.route("/p2p",      p2pRoutes);
+app.route("/referral", referralRoutes);
+app.route("/rewards",  rewardsRoutes);
+app.route("/account",  accountRoutes);
+```
+**NEXUS must fix this immediately as the very first commit of Wave 4.**
+Import and mount all four in `server/index.ts`. Also add `p2pRoutes` import.
+
+---
+
+### NEXUS — Wave 4
+
+#### N-CRITICAL: Mount missing routes (do this FIRST, one commit)
+In `server/index.ts` add:
+```ts
+import p2pRoutes      from "./routes/p2p";
+import referralRoutes from "./routes/referral";
+import rewardsRoutes  from "./routes/rewards";
+import accountRoutes  from "./routes/account";
+// then in the routes section:
+app.route("/p2p",      p2pRoutes);
+app.route("/referral", referralRoutes);
+app.route("/rewards",  rewardsRoutes);
+app.route("/account",  accountRoutes);
+```
+Push immediately. This single fix makes P2P, Referral, Rewards, and Account settings visible to users.
+
+#### N-C: Fix Rewards Route (do second)
+File: `server/routes/rewards.ts`
+
+1. **Daily login 24h guard** — before crediting `daily_login`, query ledger_entries for a `reward:daily_login` entry in the last 24 hours for this uid. If found: return 400 "Already claimed today."
+2. **Global rewards kill switch** — before any claim, query `system_config` for key `rewards_enabled`. If value is not `"true"`, return 400 "Rewards paused." Default to paused. Admin sets it to true when ready.
+3. **Budget cap** — query `system_config` for `rewards_budget_remaining_usdt`. If `parseFloat(budget) < parseFloat(task.reward)`, return 400 "Reward pool empty." On successful claim, `UPDATE system_config SET value = (value::numeric - reward)::text WHERE key = 'rewards_budget_remaining_usdt'`.
+4. Set all task reward amounts to `"0"` by default — rewards are XP-only until budget is funded. Leave the USDT structure in place for when you fund the pool.
+
+#### N-D: Native Exchange Token + Airdrop System
+
+**Step 1 — KKE Token (KryptoKe Exchange Token)**
+
+Migration `021_kke_token.sql`:
+```sql
+-- Insert KKE as a platform token in the tokens table
+INSERT INTO tokens (symbol, name, decimals, chain, logo_url, is_native_token, total_supply, circulating_supply)
+VALUES ('KKE', 'KryptoKe Token', 18, 'INTERNAL', '/icon-192.png', true, '1000000000', '0')
+ON CONFLICT (symbol) DO NOTHING;
+
+-- KKE balances are tracked in the balances table like any other asset
+-- KKE is internal-only: no deposit address, no withdrawal (yet)
+```
+
+KKE is an internal platform token. Users hold it in their funding wallet. It can be:
+- Airdropped to new users on signup (e.g. 100 KKE welcome bonus)
+- Earned through gamification milestones
+- Eventually traded on the exchange itself (KKE/USDT pair)
+
+**Step 2 — Airdrop System**
+
+New migration `022_airdrops.sql`:
+```sql
+CREATE TABLE airdrops (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  segment TEXT NOT NULL,
+  asset TEXT NOT NULL DEFAULT 'KKE',
+  amount_per_user NUMERIC NOT NULL,
+  recipient_count INT NOT NULL DEFAULT 0,
+  total_amount NUMERIC NOT NULL DEFAULT 0,
+  note TEXT,
+  created_by_uid UUID REFERENCES users(uid),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE airdrops ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "admin_only" ON airdrops USING (false);
+```
+
+New endpoint `POST /admin/airdrop` (adminMiddleware):
+```ts
+body: {
+  asset: string           // default 'KKE'
+  amount_per_user: string
+  segment: 'all' | 'kyc_verified' | 'new_users_7d' | 'single'
+  uid?: string            // if segment = 'single'
+  note: string
+}
+```
+Logic:
+1. Query UIDs for segment.
+2. For each recipient: `upsertBalance(uid, asset, add(current, amount), 'funding')` + `createLedgerEntry(type: 'airdrop')` + `Notifications.inApp(uid, 'airdrop', ...)`.
+3. Insert into `airdrops` table with actual recipient_count and total_amount.
+4. Return `{ success: true, recipientCount, totalDistributed }`.
+
+**Welcome airdrop on register**: in `server/routes/auth.ts` after successful registration, fire-and-forget: credit 100 KKE to new user's funding wallet + create ledger entry `type: 'welcome_bonus'`.
+
+**Admin UI**: add "Airdrop" card on `/admin/dashboard` showing: KKE total supply, circulating supply (sum of all KKE balances), last 5 airdrops. "New Airdrop" button opens form.
+
+---
+
+### FORGE — Wave 4
+
+#### F-D: Futures Complete Overhaul
+
+**Step 1 — Market data endpoint**
+`GET /api/v1/futures/market-data?symbol=BTC`
+
+Fetch from Binance Futures (no API key needed):
+```ts
+const [premium, oi, ticker] = await Promise.all([
+  fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}USDT`).then(r => r.json()),
+  fetch(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}USDT`).then(r => r.json()),
+  fetch(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}USDT`).then(r => r.json()),
+]);
+```
+Cache in Redis `futures:mkt:{symbol}` TTL 5s. Return:
+```ts
+{ markPrice, indexPrice, fundingRate, fundingCountdownSeconds, openInterest, volume24h, change24h }
+```
+
+**Step 2 — Max leverage per symbol**
+Add to `server/routes/futures.ts`:
+```ts
+const MAX_LEVERAGE: Record<string, number> = {
+  BTC: 125, ETH: 100, BNB: 75, SOL: 75, XRP: 75,
+  ADA: 75, DOGE: 75, AVAX: 50, LINK: 50, DOT: 50,
+  DEFAULT: 50,
+};
+export function getMaxLeverage(symbol: string): number {
+  return MAX_LEVERAGE[symbol.toUpperCase()] ?? MAX_LEVERAGE.DEFAULT;
+}
+```
+Update the zod schema: leverage max is now dynamic (validate server-side against `getMaxLeverage`).
+Expose via `GET /api/v1/futures/max-leverage?symbol=BTC` → `{ maxLeverage: 125 }`.
+
+**Step 3 — Rebuild `components/trade/FuturesTab.tsx` completely**
+
+Accept props from parent: `interface FuturesTabProps { symbol: string; onSymbolChange: (s: string) => void }`
+
+Remove the internal 7-token POPULAR array and its button strip. The symbol comes from the parent trade page (which already has the full PairSelector). Show the current symbol in the stats bar only.
+
+New layout:
+```
+┌─ Compact stats bar (fetched from /futures/market-data) ──────────────────┐
+│ BTCUSDT Perp   [Isolated] [Cross]                                         │
+│ Mark $94,200   Index $94,180                                               │
+│ Funding +0.01% · 4h 22m   OI 48,240 BTC   24h +2.4%                     │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ Order type tabs ─────────────────────────────────────────────────────────┐
+│ [Market]   [Limit]   [TP/SL]                                              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ Long / Short toggle ─────────────────────────────────────────────────────┐
+│ [████ Long ████]   [     Short     ]                                      │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ Leverage ────────────────────────────────────────────────────────────────┐
+│ Leverage  1×  ●────────────────────  125×   [20×] ← tap to type          │
+│ (slider from 1 to maxLeverage for current symbol, step 1)                 │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ Amount ──────────────────────────────────────────────────────────────────┐
+│ Margin  [___________ USDT]   = 0.00000 BTC                               │
+│ 0%  ●──────────────────────────────────────  100%                        │
+│ (continuous slider from 0 to available balance, updates input live)       │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ Limit price (shown only when order type = Limit) ────────────────────────┐
+│ Price  [___________ USDT]                                                  │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ TP / SL (always visible) ────────────────────────────────────────────────┐
+│ Take Profit [$_______]     Stop Loss [$_______]                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ Order summary ───────────────────────────────────────────────────────────┐
+│ Liq. Price ~$89,234   Notional $2,000   Fee 0.04 USDT                    │
+│ Avail: 248.50 USDT                                                        │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┌─ Action button ───────────────────────────────────────────────────────────┐
+│ [█████████  Open Long · 20×  █████████]                                   │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+Margin mode:
+- **Isolated**: `liqPrice = entry × (1 - 1/lev + 0.004)` for long, `entry × (1 + 1/lev - 0.004)` for short
+- **Cross**: show "~varies" for liq price, add a tooltip "Cross margin uses your entire trading balance as collateral"
+- Store margin mode in the position record (add `margin_mode TEXT DEFAULT 'isolated'` column via migration)
+
+Show a one-time risk warning (localStorage `futures_risk_warned`) before the first position: "Futures trading carries significant risk. You may lose more than your initial margin in cross margin mode."
+
+**Positions drawer** — do NOT render positions inline below the form. Instead:
+- Fixed bottom bar: "Positions (N) · PnL: +$X.XX" — tapping opens a BottomSheet
+- Inside sheet: tabs — Positions | Orders | History
+- Each position card: symbol, Long/Short, leverage, entry, mark, liq, margin, unrealised PnL (refetch every 5s), ROE%
+- Per card: "Close All" button + "Partial Close" input (amount field + confirm) + "Edit TP/SL" (opens mini sheet)
+
+**Update trade page** to pass symbol down:
+```tsx
+{activeMode === "Futures" && (
+  <FuturesTab symbol={symbol} onSymbolChange={(s) => handlePairChange(s, `${s}USDT`)} />
+)}
+```
+
+#### F-E: Spot Order Form — Real Slider
+
+File: `components/trade/OrderForm.tsx`
+
+Replace the 5 fixed percentage buttons with an HTML range input:
+```tsx
+<input
+  type="range"
+  min={0} max={100} step={1}
+  value={sliderPct}
+  onChange={e => setSliderPct(Number(e.target.value))}
+  className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+  style={{
+    background: `linear-gradient(to right, var(--color-primary) ${sliderPct}%, var(--color-border-2) ${sliderPct}%)`
+  }}
+/>
+<div className="flex justify-between mt-1">
+  <span className="font-price text-[10px] text-text-muted">0%</span>
+  <span className="font-price text-[10px] text-primary font-bold">{sliderPct}%</span>
+  <span className="font-price text-[10px] text-text-muted">Max</span>
+</div>
+```
+Keep `sliderPct` state and the existing `useEffect` that converts pct to amount — only the UI changes.
+
+#### F-F: Convert Tab — Fix Token Selector
+
+File: `components/trade/ConvertTab.tsx`
+
+The "from" and "to" token selectors already work (they open a full coin list). The issue is ConvertTab does not receive or sync with the symbol selected in the parent trade page.
+
+Add props: `interface ConvertTabProps { defaultFrom?: string }`. In `app/(app)/trade/page.tsx`:
+```tsx
+{activeMode === "Convert" && <ConvertTab defaultFrom={symbol} />}
+```
+In ConvertTab, initialise `fromCoin` state using `defaultFrom` if provided.
+
+#### F-G: Menu Overhaul
+
+File: `components/home/MenuSheet.tsx`
+
+Redesign to match Binance/Bybit mobile menu style — icon grid organized into sections, not a plain list.
+
+Structure:
+```
+┌─ User card ──────────────────────────────────────────────────────────────┐
+│ [Avatar]  Display Name        UID: ···1234    [KYC badge]                │
+│ Level: Gold  ⭐ 2,450 XP                                                 │
+└──────────────────────────────────────────────────────────────────────────┘
+
+── Finance ──────────────────────────────────────────────────────────────────
+[Deposit]  [Withdraw]  [Transfer]  [Convert]
+
+── Trade ────────────────────────────────────────────────────────────────────
+[Spot]  [Futures]  [P2P]  [DEX]
+
+── Grow ─────────────────────────────────────────────────────────────────────
+[Earn]  [Loans]  [Auto-Invest]  [Bots]
+
+── Account ──────────────────────────────────────────────────────────────────
+[Rewards]  [Referral]  [Analysis]  [API Keys]
+
+── Support ───────────────────────────────────────────────────────────────────
+[FAQ]  [Live Chat]  [About]  [Settings]
+```
+
+Each cell: 64×64px rounded tile, icon on top, label below. 4 per row. Tapping navigates to the correct page. No "Coming Soon" blocking — all tiles are live (features that are incomplete show the page with a work-in-progress state, not a modal blocker).
+
+---
+
+### SHIELD — Wave 4
+
+#### S-C: Fix Duplicate Migration Numbers
+
+Rename in git:
+```bash
+git mv supabase/migrations/012_rls_custom_jwt.sql supabase/migrations/012b_rls_custom_jwt.sql
+git mv supabase/migrations/013_withdrawal_timed_out_and_evm_scanner.sql supabase/migrations/013b_withdrawal_timed_out_and_evm_scanner.sql
+git mv supabase/migrations/015_users_country_code.sql supabase/migrations/015b_users_country_code.sql
+git mv supabase/migrations/017_users_onboarded_at.sql supabase/migrations/017b_users_onboarded_at.sql
+```
+Create `supabase/migrations/README.md`:
+```md
+# Migrations
+
+Run in filename order. Files ending in `b` run after their base number.
+Example: 012 → 012b → 013 → 013b → ...
+
+Never re-number existing migrations if the DB has already been set up.
+Only rename files that have NOT been applied to production yet.
+```
+
+#### S-D: Futures RLS Fix
+
+Migration `023_futures_rls_fix.sql`:
+```sql
+DROP POLICY IF EXISTS "Users read own futures"        ON futures_positions;
+DROP POLICY IF EXISTS "Service role manages futures"  ON futures_positions;
+DROP POLICY IF EXISTS "Users read own futures_orders" ON futures_orders;
+
+CREATE POLICY "futures_read_own"
+  ON futures_positions FOR SELECT USING (get_app_uid() = uid);
+
+CREATE POLICY "futures_orders_read_own"
+  ON futures_orders FOR SELECT USING (get_app_uid() = uid);
+-- Writes are service-role only (bypasses RLS)
+```
+
+Also add `margin_mode TEXT NOT NULL DEFAULT 'isolated' CHECK (margin_mode IN ('isolated','cross'))` column to `futures_positions` if not present.
+
+#### S-E: KKE Token RLS + Balances Audit
+
+After NEXUS creates migration 021 (KKE token), verify:
+1. `balances` RLS read-own policy covers KKE rows (it should, same table).
+2. KKE balance is returned in `GET /api/v1/wallet/info` response alongside USDT/BTC etc.
+3. KKE shows up in `app/(app)/assets/page.tsx` asset list.
+4. Add KKE to the hardcoded fallback in `components/home/AllocationTiles.tsx` if it only shows known assets.
+
+#### S-F: Complete All Incomplete Feature Backends
+
+Audit and verify these routes are fully functional (they exist but need testing):
+
+**Loans** (`server/routes/account.ts` → `/account/loans`):
+- `GET /account/loans` — list user's active loans
+- `POST /account/loans` — create a loan (collateral locked, USDT credited)
+- `POST /account/loans/:id/repay` — repay with interest, collateral returned
+- Verify liquidation logic: if collateral value drops to `liquidation_ltv`, auto-liquidate
+- Liquidation cron: add to `POST /api/v1/cron/aml-score` or create separate cron
+
+**Trading Bots** (`server/routes/account.ts` → `/account/bots`):
+- `GET /account/bots` — list user's bots
+- `POST /account/bots` — create grid/DCA/rebalance bot
+- `PATCH /account/bots/:id` — pause/resume/edit
+- `DELETE /account/bots/:id` — stop bot
+- Bot execution cron: `POST /api/v1/cron/bots` — for each active bot, execute one tick:
+  - Grid bot: check if price crossed a grid level, place buy/sell accordingly
+  - DCA bot: check if investment interval has elapsed, buy configured amount
+  - Rebalance bot: check if portfolio drifted >threshold%, rebalance to targets
+- Add cron to cron-job.org: runs every 5 minutes
+
+**Auto-Invest** (DCA plans in `server/routes/account.ts`):
+- Already implemented as `/account/dca/plans` — verify it works end-to-end
+- The execution is part of the bots cron above
+
+---
+
+### PULSE — Wave 4
+
+#### P-C: Complete "Coming Soon" Account Settings
+
+File: `app/(app)/account/page.tsx`
+
+Replace all `showRoadmap(...)` calls with real functionality:
+
+**Language toggle** — store `language` in users table (column already exists per code). `PATCH /api/v1/account/language` with `{ language: 'en' | 'sw' }`. For now the app stays in English — just save the preference and show "Swahili coming soon" inline as a small note under the toggle, not a blocking modal.
+
+**Appearance / Light mode** — add `theme` to localStorage (`_kk_theme: 'dark' | 'light' | 'system'`). In `app/layout.tsx` root, read this value and apply `class="dark"` or `class="light"` to `<html>`. Add basic light mode CSS variables in `styles/globals.css` (swap bg-bg to white, text-primary to near-black, etc.). The toggle should work immediately without a page reload.
+
+**Notification preferences** — `GET /account/notification-preferences` already exists. Wire the toggle switches in the account page to call `PATCH /account/notification-preferences` with `{ email: bool, sms: bool, push: bool }`. Remove the `showRoadmap` blocker.
+
+**API Access page** — `app/(app)/account/api/page.tsx` already exists. Wire it to actual API key generation: `POST /account/api-keys` creates a key, `GET /account/api-keys` lists them, `DELETE /account/api-keys/:id` revokes. Add these three endpoints to `server/routes/account.ts`. Keys are stored in a new `api_keys` table (uid, key_hash, label, last_used_at, created_at). Show the key once on creation, never again.
+
+#### P-D: Airdrop Notification + KKE Balance Display
+
+When a user receives an airdrop (new ledger entry with `type = 'airdrop'`):
+- Supabase Realtime fires on the `balances` change (already subscribed)
+- Detect the trigger: in `useRealtimeBalances`, when a balance update arrives for asset `KKE`, check if it's new (previous value was 0). If so, trigger a special gold-colored toast: "🪙 You received X KKE from KryptoKe!" + fire `Confetti` component.
+- Also detect `airdrop` type in the notifications Realtime subscription — show a distinct notification card with a gold border in the notifications sheet.
+
+**KKE in wallet page** — in `app/(app)/me/page.tsx`, ensure KKE appears in the holdings list. Give it a distinct styling (exchange token badge, not just a plain row).
+
+#### P-E: DEX Page
+
+File: `app/(app)/dex/page.tsx`
+
+The page exists with a BSC swap UI and hardcoded token list. Make it functional:
+- Use PancakeSwap V2 public API for price quotes: `https://api.pancakeswap.info/api/v2/tokens/{address}`
+- For swap execution: construct and send a BSC transaction using the user's deposit address. Since KryptoKe holds the private keys server-side, route DEX swaps through `POST /api/v1/wallet/dex-swap`:
+  - body: `{ fromToken, toToken, amountIn, slippage }`
+  - server: get quote from PancakeSwap router, deduct from user's internal balance (like Convert does), update both balances
+  - This is effectively an internal conversion using PancakeSwap's price as the rate — same as Convert but with the DEX UI
+- Replace the emoji logos with real token logos from the tokens table
+- Add a slippage tolerance selector: 0.1% / 0.5% / 1% / Custom
+
+---
+
+## Wave 4 Final Task Order
+
+**Do in this exact sequence:**
+
+| Step | Agent | Task | Why |
+|---|---|---|---|
+| 1 | NEXUS | Mount missing routes in server/index.ts | Everything is broken without this |
+| 2 | NEXUS | N-C rewards fix | Live financial risk |
+| 3 | SHIELD | S-C rename duplicate migrations | Blocks clean DB setup |
+| 4 | SHIELD | S-D futures RLS | Futures data not loading for users |
+| 5 | FORGE | F-D futures overhaul | Biggest UX debt |
+| 6 | FORGE | F-E spot slider + F-F convert fix + F-G menu | UX polish |
+| 7 | NEXUS | N-D KKE token + airdrop system | New token for launch |
+| 8 | SHIELD | S-E KKE RLS + S-F backends | Complete all features |
+| 9 | PULSE | P-C account settings + P-D KKE UX | Remove all "coming soon" |
+| 10 | PULSE | P-E DEX page | Full feature set |
+
+After all Wave 4 tasks are done, this app is fully fledged.
