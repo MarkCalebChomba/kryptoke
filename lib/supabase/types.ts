@@ -126,7 +126,12 @@ export interface Database {
             | "airdrop"
             | "welcome_bonus"
             | "refund"
-            | "withdrawal_fee";
+            | "withdrawal_fee"
+            | "p2p_buy"
+            | "p2p_sell"
+            | "loan_disbursement"
+            | "loan_repayment"
+            | "loan_liquidation";
           reference_id: string | null;
           note: string | null;
           created_at: string;
@@ -150,7 +155,12 @@ export interface Database {
             | "airdrop"
             | "welcome_bonus"
             | "refund"
-            | "withdrawal_fee";
+            | "withdrawal_fee"
+            | "p2p_buy"
+            | "p2p_sell"
+            | "loan_disbursement"
+            | "loan_repayment"
+            | "loan_liquidation";
           reference_id?: string | null;
           note?: string | null;
           created_at?: string;

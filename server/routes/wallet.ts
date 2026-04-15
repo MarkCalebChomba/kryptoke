@@ -444,8 +444,6 @@ wallet.post(
         type: "trade",
         asset: fromToken,
         amount: `-${amountIn}`,
-        account: "funding",
-        ref_type: "dex_swap",
         note: `DEX swap ${amountIn} ${fromToken} → ${amountOut} ${toToken}`,
       }),
       createLedgerEntry({
@@ -453,8 +451,6 @@ wallet.post(
         type: "trade",
         asset: toToken,
         amount: amountOut,
-        account: "funding",
-        ref_type: "dex_swap",
         note: `DEX swap ${amountIn} ${fromToken} → ${amountOut} ${toToken}`,
       }),
     ]);
