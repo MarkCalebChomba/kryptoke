@@ -121,7 +121,12 @@ export interface Database {
             | "transfer"
             | "admin_adjustment"
             | "send"
-            | "receive";
+            | "receive"
+            | "reward"
+            | "airdrop"
+            | "welcome_bonus"
+            | "refund"
+            | "withdrawal_fee";
           reference_id: string | null;
           note: string | null;
           created_at: string;
@@ -140,7 +145,12 @@ export interface Database {
             | "transfer"
             | "admin_adjustment"
             | "send"
-            | "receive";
+            | "receive"
+            | "reward"
+            | "airdrop"
+            | "welcome_bonus"
+            | "refund"
+            | "withdrawal_fee";
           reference_id?: string | null;
           note?: string | null;
           created_at?: string;

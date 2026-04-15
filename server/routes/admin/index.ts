@@ -1101,12 +1101,13 @@ admin.get("/token-freeze/:symbol", async (c) => {
     db.from("chain_fees").select("chain_id, chain_name").order("chain_id"),
     db.from("token_chain_freeze").select("chain_id, deposit_frozen, withdraw_frozen").eq("token_symbol", symbol),
   ]);
-  const freezeMap = new Map((freezes ?? []).map((f) => [f.chain_id, f]));
+  type FreezeRow = { chain_id: string; deposit_frozen: boolean; withdraw_frozen: boolean };
+  const freezeMap = new Map((freezes ?? []).map((f) => [(f as FreezeRow).chain_id, f as FreezeRow]));
   const result = (fees ?? []).map((c) => ({
     chain_id: c.chain_id,
     chain_name: c.chain_name,
-    deposit_frozen:  freezeMap.get(c.chain_id)?.deposit_frozen  ?? false,
-    withdraw_frozen: freezeMap.get(c.chain_id)?.withdraw_frozen ?? false,
+    deposit_frozen:  freezeMap.get(c.chain_id as string)?.deposit_frozen  ?? false,
+    withdraw_frozen: freezeMap.get(c.chain_id as string)?.withdraw_frozen ?? false,
   }));
   return c.json({ success: true, data: result });
 });
@@ -1257,11 +1258,10 @@ admin.post(
 
     // Notify user
     const { Notifications } = await import("@/server/services/notifications");
-    await Notifications.send(entry.uid, {
-      type: "security_alert",
-      title: "Withdrawal rejected",
-      body: `Your withdrawal of ${entry.gross_amount} ${entry.asset_symbol} was rejected. Reason: ${notes}. Your balance has been refunded.`,
-    });
+    await Notifications.securityAlert(
+      entry.uid,
+      `Your withdrawal of ${entry.gross_amount} ${entry.asset_symbol} was rejected. Reason: ${notes}. Your balance has been refunded.`
+    );
 
     return c.json({ success: true, data: { message: "Withdrawal rejected and balance refunded." } });
   }
@@ -1513,7 +1513,7 @@ admin.get("/compliance", async (c) => {
     ? await db.from("users").select("uid, email, display_name").in("uid", uids)
     : { data: [] };
 
-  const userMap = new Map((users ?? []).map((u) => [u.uid, u]));
+  const userMap = new Map((users ?? []).map((u) => [(u as { uid: string; email: string; display_name: string | null }).uid, u as { uid: string; email: string; display_name: string | null }]));
 
   const items = (scores ?? [])
     .map((s: unknown) => {

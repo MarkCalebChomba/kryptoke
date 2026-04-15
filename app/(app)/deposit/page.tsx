@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/shared/TopBar";
 import { useMpesaDeposit } from "@/lib/hooks/useDeposit";
@@ -81,7 +80,9 @@ type CryptoStep = "token" | "chain" | "address";
 export default function DepositPage() {
   const toast = useToastActions();
   const { user } = useAuth();
-  const countryCode = (user as Record<string, unknown>)?.country_code as string ?? "KE";
+  const countryCode = ((user as Record<string, unknown>)?.country_code as string) ?? "KE";
+  const currency = getCurrencyForCountry(countryCode);
+  const isKe = countryCode === "KE";
 
   // Fetch available payment methods for this user's country
   const { data: paymentMethodsData } = useQuery({
@@ -89,22 +90,7 @@ export default function DepositPage() {
     queryFn: () => apiGet<PaymentMethodsResponse>(`/config/payment-methods?country=${countryCode}`),
     staleTime: 5 * 60_000,
   });
-
-  const countryCode = user?.countryCode ?? "KE";
-  const currency = getCurrencyForCountry(countryCode);
-  const isKe = countryCode === "KE";
-
-  // Fetch available payment methods for the user's country
-  // NEXUS N-A will build GET /api/v1/config/payment-methods?country=XX
-  // Until deployed, this gracefully falls back to showing M-Pesa for KE users.
-  const { data: paymentMethods } = useQuery({
-    queryKey: ["payment-methods", countryCode],
-    queryFn: () => apiGet<{ methods: Array<{ id: string; name: string; type: string }> }>(
-      `/config/payment-methods?country=${countryCode}`
-    ).catch(() => null), // endpoint not yet live — fail silently
-    staleTime: 5 * 60_000,
-  });
-  const hasFiatMethod = isKe || (paymentMethods?.methods?.length ?? 0) > 0;
+  const hasFiatMethod = isKe || (paymentMethodsData?.hasActiveProviders ?? false);
 
   const [tab, setTab] = useState<DepositTab>("mpesa");
   const [copied, setCopied] = useState(false);
@@ -112,7 +98,7 @@ export default function DepositPage() {
   // M-Pesa state
   const [amount, setAmount] = useState("");
   const [phone, setPhone] = useState(user?.phone ?? "");
-  const { mutateAsync: submitDeposit, isPending: depositing } = useMpesaDeposit();
+  const { mutateAsync: submitDeposit, isLoading: depositing } = useMpesaDeposit();
 
   // Crypto state
   const [cryptoStep, setCryptoStep] = useState<CryptoStep>("token");
