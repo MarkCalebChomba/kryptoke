@@ -1,10 +1,11 @@
 /**
  * server/jobs/prices.ts
  *
- * Price cron — fetches live prices from CoinGecko (works from Vercel/cloud IPs,
- * unlike Binance which blocks datacenter traffic) and writes to:
- *   1. Redis key "market:prices" — single JSON blob read by the markets API
- *   2. Supabase market_cache     — persistent fallback, survives Redis flush
+ * Price cron — fetches live prices from CoinGecko and writes to Redis only.
+ * Redis key "market:prices" is the canonical price store.
+ * market_cache DB upsert removed: was writing 200 rows to Postgres every 30s,
+ * causing Supabase Disk IO spikes with zero benefit (Redis is faster and always
+ * available; the DB fallback was never actually read by any API route).
  *
  * Called by: POST /api/v1/cron/prices  (secured by X-Cron-Secret header)
  * Schedule:  Every 60 seconds via cron-job.org
@@ -49,7 +50,6 @@ async function fetchCoinGeckoPrices(): Promise<Map<string, {
   name: string; logo_url: string; rank: number;
 }>> {
   // Fetch top 200 — page 1 (ranks 1-100) + page 2 (ranks 101-200)
-  // CoinGecko free API works from server/cloud IPs
   const BASE =
     "https://api.coingecko.com/api/v3/coins/markets" +
     "?vs_currency=usd&order=market_cap_desc&per_page=100" +
@@ -104,7 +104,7 @@ export async function refreshPrices(): Promise<{ updated: number; errors: string
   const db = getDb();
   const errors: string[] = [];
 
-  // Load active tokens
+  // Load active tokens for metadata enrichment (name, logo override)
   const { data: tokens, error: tokenErr } = await db
     .from("tokens")
     .select("id, symbol, name, logo_url, cmc_rank")
@@ -113,7 +113,7 @@ export async function refreshPrices(): Promise<{ updated: number; errors: string
 
   if (tokenErr) errors.push(`DB load: ${tokenErr.message}`);
 
-  // Fetch prices from CoinGecko (works from Vercel/cloud)
+  // Fetch prices from CoinGecko
   let cgMap: Awaited<ReturnType<typeof fetchCoinGeckoPrices>> = new Map();
   try {
     cgMap = await fetchCoinGeckoPrices();
@@ -127,14 +127,8 @@ export async function refreshPrices(): Promise<{ updated: number; errors: string
 
   // Build the price blob — merge DB token metadata with CoinGecko prices
   const priceBlob: Record<string, CoinPrice> = {};
-  const now = new Date().toISOString();
-  const marketCacheRows: Array<{
-    symbol: string; price_usd: number; change_24h: number; change_1h: number;
-    volume_24h: number; high_24h: number; low_24h: number; source: string; updated_at: string;
-  }> = [];
   let updated = 0;
 
-  // Include all coins from CoinGecko (not just DB tokens) so markets page is full
   for (const [sym, data] of cgMap) {
     const dbToken = (tokens ?? []).find((t) => t.symbol === sym);
 
@@ -152,26 +146,15 @@ export async function refreshPrices(): Promise<{ updated: number; errors: string
       source:     "coingecko",
     };
 
-    marketCacheRows.push({
-      symbol:     sym,
-      price_usd:  parseFloat(data.price)      || 0,
-      change_24h: parseFloat(data.change_24h) || 0,
-      change_1h:  parseFloat(data.change_1h)  || 0,
-      volume_24h: parseFloat(data.volume)     || 0,
-      high_24h:   parseFloat(data.high)       || 0,
-      low_24h:    parseFloat(data.low)        || 0,
-      source: "coingecko",
-      updated_at: now,
-    });
-
     updated++;
   }
 
-  // Write to Redis (5 min TTL, cron refills every 60s)
+  // Write prices to Redis (canonical store — 5 min TTL, cron refills every 60s)
   await redis.set(MARKET_PRICES_KEY, JSON.stringify(priceBlob), { ex: 300 });
 
-  // Compute gainers / losers / hot lists
+  // Compute and cache gainers / losers / hot lists
   const allCoins = Object.values(priceBlob);
+
   const gainers = [...allCoins]
     .sort((a, b) => parseFloat(b.change_24h) - parseFloat(a.change_24h))
     .slice(0, 20);
@@ -191,13 +174,10 @@ export async function refreshPrices(): Promise<{ updated: number; errors: string
     redis.set(MARKET_HOT,         JSON.stringify(hot),     { ex: 300 }),
   ]);
 
-  // Persist to Supabase market_cache
-  if (marketCacheRows.length > 0) {
-    const { error: cacheErr } = await db
-      .from("market_cache")
-      .upsert(marketCacheRows, { onConflict: "symbol" });
-    if (cacheErr) errors.push(`market_cache upsert: ${cacheErr.message}`);
-  }
+  // NOTE: market_cache DB upsert intentionally removed.
+  // Writing 200 rows to Postgres every 30s was causing Supabase Disk IO spikes.
+  // Redis is the canonical price store. All market API routes read from Redis only.
 
   return { updated, errors };
 }
+
