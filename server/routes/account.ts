@@ -115,7 +115,20 @@ account.get("/notification-preferences", async (c) => {
 });
 
 account.patch("/notification-preferences",
-  zValidator("json", z.record(z.boolean()).partial()),
+  zValidator(
+    "json",
+    z.object({
+      email:              z.boolean().optional(),
+      sms:                z.boolean().optional(),
+      push:               z.boolean().optional(),
+      deposit_confirmed:  z.boolean().optional(),
+      withdrawal_sent:    z.boolean().optional(),
+      order_filled:       z.boolean().optional(),
+      price_alert:        z.boolean().optional(),
+      security_alert:     z.boolean().optional(),
+      marketing:          z.boolean().optional(),
+    })
+  ),
   async (c) => {
     const uid  = c.get("uid") as string;
     const body = c.req.valid("json");
