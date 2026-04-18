@@ -41,22 +41,8 @@ export function useTradeHistory() {
   });
 }
 
-export function useOrderBook(symbol: string) {
-  return useQuery({
-    queryKey: ["market", "orderbook", symbol],
-    queryFn: () =>
-      apiGet<{
-        symbol: string;
-        bids: { price: string; quantity: string; depth: number }[];
-        asks: { price: string; quantity: string; depth: number }[];
-        spread: string;
-        updatedAt: number;
-      }>(`/market/orderbook/${symbol}`),
-    staleTime: 2000,
-    refetchInterval: 3000,
-    enabled: !!symbol,
-  });
-}
+// useOrderBook has moved to lib/hooks/useOrderBook.ts (direct Binance WS, 100ms updates)
+// Import from there: import { useOrderBook } from "@/lib/hooks/useOrderBook";
 
 export interface ConvertPayload {
   fromAsset: string;

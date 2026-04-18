@@ -79,10 +79,13 @@ export function TradingViewWidget({
         locale: "en",
         backgroundColor: "#0E1420",
         gridColor: "#1C2840",
-        hide_top_toolbar: false,
-        hide_legend: false,
+        toolbar_bg: "#0E1420",
+        hide_top_toolbar: true,        // removes Binance branding toolbar
+        hide_legend: false,            // keep price/OHLC legend
+        allow_symbol_change: false,    // symbol comes from our UI, not TradingView's selector
         save_image: false,
         hide_volume: false,
+        withdateranges: false,
         support_host: "https://www.tradingview.com",
       });
 

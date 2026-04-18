@@ -8,6 +8,7 @@ import { usePreferences } from "@/lib/store";
 import { SkeletonCoinRow } from "@/components/shared/Skeleton";
 import { IconSearch, IconStarFilled, IconStar } from "@/components/icons";
 import { apiGet } from "@/lib/api/client";
+import { useTokenList } from "@/lib/hooks/useTokenList";
 
 interface Coin {
   symbol:     string;
@@ -223,6 +224,10 @@ export default function MarketsPage() {
   const [livePrices,     setLivePrices]     = useState<PriceUpdate>({});
   const [visibleSymbols, setVisibleSymbols] = useState<string[]>([]);
 
+  // Shared token list — populated from the 60s TanStack Query cache
+  // Avoids re-fetching when navigating Home→Markets→Home
+  const { data: sharedTokenList, isLoading: sharedLoading } = useTokenList();
+
   useVisibleSymbolsWs(visibleSymbols, useCallback((u: PriceUpdate) => {
     setLivePrices((prev) => ({ ...prev, ...u }));
   }, []));
@@ -261,8 +266,31 @@ export default function MarketsPage() {
     return () => observer.disconnect();
   }, [hasMore, loadingMore, loading]);
 
-  // Fetch — only depends on filter values, no auth state
+  // Determine if we can serve from the shared cache
+  // Cache works for All tab with no search/chain filter
+  const canUseCache = activeTab === "All" && !chainFilter && !search;
+
+  // Fetch — falls back to network for filtered/sorted tabs
   const fetchCoins = useCallback(async (nextPage: number, reset: boolean) => {
+    // For the All tab with no filters, use shared cache (no network needed)
+    if (canUseCache && sharedTokenList && sharedTokenList.length > 0) {
+      const all = sharedTokenList as Coin[];
+      if (reset) {
+        setAllCoinsCache(all);
+        setCoins(all.slice(0, PAGE_SIZE));
+        setHasMore(all.length > PAGE_SIZE);
+        setLoading(false);
+        setError(false);
+      } else {
+        const start = (nextPage - 1) * PAGE_SIZE;
+        const slice = allCoinsCache.slice(start, start + PAGE_SIZE);
+        setCoins((prev) => [...prev, ...slice]);
+        setHasMore(start + PAGE_SIZE < allCoinsCache.length);
+        setLoadingMore(false);
+      }
+      return;
+    }
+
     if (reset) { setLoading(true); setError(false); }
     else setLoadingMore(true);
     try {
@@ -277,7 +305,6 @@ export default function MarketsPage() {
         setCoins(all.slice(0, PAGE_SIZE));
         setHasMore(all.length > PAGE_SIZE);
       } else {
-        // Load more — slice from cache
         const start = (nextPage - 1) * PAGE_SIZE;
         const slice = allCoinsCache.slice(start, start + PAGE_SIZE);
         setCoins((prev) => [...prev, ...slice]);
@@ -290,7 +317,25 @@ export default function MarketsPage() {
       setLoadingMore(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, chainFilter, search, allCoinsCache]);
+  }, [activeTab, chainFilter, search, allCoinsCache, canUseCache, sharedTokenList]);
+
+  // Seed from shared cache on initial load (instant, no network)
+  useEffect(() => {
+    if (canUseCache && sharedTokenList && sharedTokenList.length > 0 && coins.length === 0) {
+      const all = sharedTokenList as Coin[];
+      setAllCoinsCache(all);
+      setCoins(all.slice(0, PAGE_SIZE));
+      setHasMore(all.length > PAGE_SIZE);
+      setLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedTokenList, canUseCache]);
+
+  // Reflect shared cache loading state
+  useEffect(() => {
+    if (canUseCache && sharedLoading) setLoading(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedLoading, canUseCache]);
 
   // Reset on filter change
   useEffect(() => {

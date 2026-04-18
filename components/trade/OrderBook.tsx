@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils/cn";
 import { formatPrice } from "@/lib/utils/formatters";
-import { useOrderBook } from "@/lib/hooks/useTrades";
+import { useOrderBook } from "@/lib/hooks/useOrderBook";
 import { usePrices } from "@/lib/store";
 import { BottomSheet } from "@/components/shared/BottomSheet";
 import { priceDirection } from "@/lib/utils/formatters";
@@ -165,7 +165,7 @@ interface OrderBookProps {
 }
 
 export function OrderBook({ symbol, currentPrice, kesPerUsd, onPriceClick }: OrderBookProps) {
-  const { data: orderBook, isLoading } = useOrderBook(symbol);
+  const { bids: rawBidsAll, asks: rawAsksAll, spread, isLoading } = useOrderBook(symbol);
   const { prices } = usePrices();
   const [fullOpen, setFullOpen] = useState(false);
   const [view, setView] = useState<OrderBookView>("both");
@@ -173,7 +173,7 @@ export function OrderBook({ symbol, currentPrice, kesPerUsd, onPriceClick }: Ord
   const livePrice = prices[symbol.replace("USDT", "")] ?? currentPrice;
   const kesPrice = livePrice !== "0" ? (parseFloat(livePrice) * parseFloat(kesPerUsd)).toFixed(0) : "0";
 
-  if (isLoading || !orderBook) {
+  if (isLoading) {
     return (
       <div className="flex flex-col h-full p-1">
         <div className="flex gap-1 px-1 py-1 border-b border-border mb-1">
@@ -189,10 +189,10 @@ export function OrderBook({ symbol, currentPrice, kesPerUsd, onPriceClick }: Ord
     );
   }
 
-  const rawAsks = [...(orderBook.asks ?? [])];
-  const rawBids = orderBook.bids ?? [];
-  const asks = rawAsks.slice(0, 10);
-  const bids = rawBids.slice(0, 10);
+  const rawAsks = [...rawAsksAll].slice(0, 10);
+  const rawBids = rawBidsAll.slice(0, 10);
+  const asks = rawAsks;
+  const bids = rawBids;
 
   const totalBidQty = bids.reduce((s, b) => s + parseFloat(b.quantity), 0);
   const totalAskQty = asks.reduce((s, a) => s + parseFloat(a.quantity), 0);
@@ -275,7 +275,7 @@ export function OrderBook({ symbol, currentPrice, kesPerUsd, onPriceClick }: Ord
         symbol={symbol}
         asks={rawAsks}
         bids={rawBids}
-        spread={orderBook.spread}
+        spread={spread}
         livePrice={livePrice}
         kesPrice={kesPrice}
         onRowClick={handleRowClick}

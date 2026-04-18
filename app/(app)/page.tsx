@@ -11,6 +11,7 @@ import { DepositSheet } from "@/components/home/DepositSheet";
 import { P2PSheet } from "@/components/home/P2PSheet";
 import { useWallet } from "@/lib/hooks/useWallet";
 import { useHomeData } from "@/lib/hooks/useMarketData";
+import { useTokenList } from "@/lib/hooks/useTokenList";
 import { useNotifications } from "@/lib/hooks/useNotifications";
 import { usePreferences, useAuth } from "@/lib/store";
 import { formatPrice, formatChange, priceDirection } from "@/lib/utils/formatters";
@@ -174,13 +175,15 @@ export default function HomePage() {
   const { totalKes, totalUsd, rate, isLoading: walletLoading } = useWallet();
   const { user } = useAuth();
   const { data: homeData, isLoading: homeLoading } = useHomeData();
+  const { data: tokenList, isLoading: tokenListLoading } = useTokenList();
   const { isFavorite } = usePreferences();
 
   const serverCoins = homeData?.homeCoins ?? [];
   const fearGreed   = homeData?.fearGreed ?? null;
   const fgHistory   = homeData?.fgHistory ?? [];
   const overview    = homeData?.overview  ?? null;
-  const marketList  = homeData?.marketList ?? [];
+  // Use shared token list (60s cache — navigating Markets→Home won't re-fetch)
+  const marketList  = tokenList?.slice(0, 50) ?? homeData?.marketList ?? [];
 
   // Live prices from Binance for fallback coins
   const [liveData, setLiveData] = useState<Record<string, { price: string; change: string }>>({});
@@ -364,7 +367,7 @@ export default function HomePage() {
           className="font-outfit text-xs text-primary font-medium">See all →</button>
       </div>
 
-      {homeLoading && marketList.length === 0 ? (
+      {tokenListLoading && marketList.length === 0 ? (
         <div className="mx-4 space-y-0 border border-border rounded-2xl overflow-hidden">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="flex items-center gap-3 px-3 py-3 border-b border-border/40 last:border-0">
