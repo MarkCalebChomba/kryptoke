@@ -386,6 +386,115 @@ export const Notifications = {
     }
   },
 
+
+  /* P2P / internal transfer — sender ──────────────────────────────────── */
+  transferSent: async (uid: string, amount: string, asset: string, recipientName: string) => {
+    await createNotification({
+      uid, type: "transfer_sent" as never,
+      title: "Transfer sent",
+      body: `${amount} ${asset} sent to ${recipientName}.`,
+      data: { amount, asset, recipientName },
+    });
+    const c = await getUserContact(uid);
+    if (!c) return;
+    if (c.emailNotifications) {
+      await sendEmail(c.email, `Transfer sent — KryptoKe`, emailBase(`
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:8px;color:#F0F4FF;">Transfer sent ✓</h2>
+        <p style="color:#8A9CC0;margin-bottom:20px;font-size:15px;">
+          You sent <strong style="color:#F0F4FF;">${amount} ${asset}</strong> to <strong style="color:#F0F4FF;">${recipientName}</strong>.
+          Transfers are instant and irreversible.
+        </p>
+      `));
+    }
+    if (c.smsNotifications && c.phone) {
+      await sendSms(c.phone, `KryptoKe: You sent ${amount} ${asset} to ${recipientName}.`);
+    }
+  },
+
+  /* P2P / internal transfer — recipient ───────────────────────────────── */
+  transferReceived: async (uid: string, amount: string, asset: string, senderName: string, note?: string) => {
+    await createNotification({
+      uid, type: "transfer_received" as never,
+      title: "Transfer received",
+      body: `You received ${amount} ${asset} from ${senderName}${note ? `: "${note}"` : ""}.`,
+      data: { amount, asset, senderName, note },
+    });
+    const c = await getUserContact(uid);
+    if (!c) return;
+    if (c.emailNotifications) {
+      await sendEmail(c.email, `You received ${asset} — KryptoKe`, emailBase(`
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:8px;color:#00E5B4;">Transfer received 💸</h2>
+        <p style="color:#8A9CC0;margin-bottom:20px;font-size:15px;">
+          <strong style="color:#F0F4FF;">${senderName}</strong> sent you
+          <strong style="color:#00E5B4;">${amount} ${asset}</strong>.
+          ${note ? `<br/><em style="color:#8A9CC0;">"${note}"</em>` : ""}
+        </p>
+        <a href="https://kryptoke-mu.vercel.app"
+           style="display:block;text-align:center;background:#00E5B4;color:#080C14;font-weight:700;
+                  padding:14px 24px;border-radius:12px;text-decoration:none;font-size:15px;">
+          View Wallet
+        </a>
+      `));
+    }
+    if (c.smsNotifications && c.phone) {
+      await sendSms(c.phone,
+        `KryptoKe: ${senderName} sent you ${amount} ${asset}${note ? ` "${note.slice(0, 40)}"` : ""}.`
+      );
+    }
+  },
+
+  /* Trade / convert completed ──────────────────────────────────────────── */
+  tradeFilled: async (uid: string, fromAsset: string, toAsset: string, fromAmount: string, toAmount: string) => {
+    await createNotification({
+      uid, type: "order_filled",
+      title: "Trade completed",
+      body: `Swapped ${fromAmount} ${fromAsset} → ${toAmount} ${toAsset}.`,
+      data: { fromAsset, toAsset, fromAmount, toAmount },
+    });
+    // In-app only — no email/SMS for routine small trades (email for large trades already handled)
+  },
+
+  /* Crypto withdrawal queued ───────────────────────────────────────────── */
+  cryptoWithdrawalQueued: async (uid: string, amount: string, asset: string, toAddress: string, cancelWindow: number) => {
+    await createNotification({
+      uid, type: "withdrawal_sent" as never,
+      title: "Withdrawal queued",
+      body: `${amount} ${asset} queued. Cancel within ${cancelWindow} min if this was a mistake.`,
+      data: { amount, asset, toAddress, cancelWindow },
+    });
+    const c = await getUserContact(uid);
+    if (!c) return;
+    if (c.emailNotifications) {
+      await sendEmail(c.email, `Crypto withdrawal queued — KryptoKe`, emailBase(`
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:8px;color:#F0F4FF;">Withdrawal queued</h2>
+        <p style="color:#8A9CC0;margin-bottom:20px;font-size:15px;">
+          <strong style="color:#F0F4FF;">${amount} ${asset}</strong> withdrawal to
+          <code style="color:#4A5B7A;font-size:12px;">${toAddress.slice(0,12)}…${toAddress.slice(-6)}</code>
+          has been queued. You have <strong style="color:#F0B429;">${cancelWindow} minutes</strong> to cancel.
+        </p>
+        <p style="color:#8A9CC0;font-size:13px;">
+          Not you? Go to the app immediately and cancel from your withdrawal history, then contact support.
+        </p>
+      `));
+    }
+    if (c.smsNotifications && c.phone) {
+      await sendSms(c.phone,
+        `KryptoKe: ${amount} ${asset} withdrawal queued. Cancel within ${cancelWindow}min if not you.`
+      );
+    }
+  },
+
+  /* Internal account transfer (funding↔trading↔earn) ─────────────────── */
+  internalTransfer: async (uid: string, amount: string, asset: string, from: string, to: string) => {
+    await createNotification({
+      uid, type: "transfer_received" as never,
+      title: "Internal transfer complete",
+      body: `${amount} ${asset} moved from ${from} to ${to} account.`,
+      data: { amount, asset, from, to },
+    });
+    // In-app only — internal account moves don't warrant email/SMS
+  },
+
   /* earn interest (in-app only) ────────────────────────────────────────── */
   earnInterest: async (uid: string, amount: string, asset: string) => {
     await createNotification({

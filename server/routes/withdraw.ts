@@ -419,6 +419,9 @@ withdraw.post("/crypto", withSensitiveRateLimit(),
       ? "Processing — large withdrawals are verified for security. This typically takes up to 24 hours."
       : "Withdrawal queued. You have 10 minutes to cancel.";
 
+    // Notify user (fire-and-forget)
+    Notifications.cryptoWithdrawalQueued(uid, netAmount, asset, toAddress, 10).catch(() => undefined);
+
     return c.json({ success: true, data: { queueId: qe.id, status: qe.status, amount, fee: totalFee, netAmount, cancelExpiresAt: qe.cancel_expires_at, requiresAdminApproval, message } });
   }
 );

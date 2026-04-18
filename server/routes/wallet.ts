@@ -9,6 +9,7 @@ import { getDb } from "@/server/db/client";
 import { getExchangeRate } from "@/server/services/forex";
 import { getBnbBalance } from "@/server/services/blockchain";
 import { validateAmount, subtract, add } from "@/lib/utils/money";
+import { Notifications } from "@/server/services/notifications";
 import type { WalletInfo, Balance } from "@/types";
 import bcrypt from "bcryptjs";
 
@@ -166,6 +167,9 @@ wallet.post(
       note: `Transfer ${amount} ${asset} from ${from} to ${to}`,
     });
 
+    // In-app notification (fire-and-forget)
+    Notifications.internalTransfer(uid, amount, asset, from, to).catch(() => undefined);
+
     return c.json({
       success: true,
       data: {
@@ -271,17 +275,20 @@ wallet.post(
         redis.del(`wallet:info:${recipient.uid}`).catch(() => undefined),
       ]);
 
-      // ── In-app notification for recipient (fire-and-forget) ─────────────────
+      // ── Notifications for both parties (fire-and-forget) ────────────────────
       (async () => {
         try {
-          await db.from("notifications").insert({
-            uid: recipient.uid,
-            type: "transfer_received",
-            title: "Transfer received",
-            body: `You received ${amount} ${asset} from ${sender.display_name ?? "a KryptoKe user"}${note ? `: "${note}"` : ""}`,
-            read: false,
-            created_at: new Date().toISOString(),
-          });
+          // In-app + email/SMS for recipient
+          await Notifications.transferReceived(
+            recipient.uid, amount, asset,
+            sender.display_name ?? "KryptoKe user",
+            note || undefined
+          );
+          // In-app + email for sender
+          await Notifications.transferSent(
+            uid, amount, asset,
+            recipient.display_name ?? "KryptoKe user"
+          );
         } catch {
           // Non-fatal — transfer already completed
         }

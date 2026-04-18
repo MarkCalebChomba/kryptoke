@@ -272,6 +272,9 @@ trade.post(
       ).catch(() => undefined);
     }
 
+    // Notify trade filled (in-app only for small trades)
+    Notifications.tradeFilled(uid, tokenIn, tokenOut, amountIn, actualOut).catch(() => undefined);
+
     // XP — fire-and-forget
     awardXp(uid, "trade_completed", 10, tradeRecord.id).catch(() => undefined);
 

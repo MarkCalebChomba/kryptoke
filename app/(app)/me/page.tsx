@@ -176,6 +176,7 @@ export default function WalletPage() {
   const { prices, priceChanges } = usePrices();
   const [hidden, setHidden] = useState(false);
   const [expandedTx, setExpandedTx] = useState<string | null>(highlightId);
+  const [txSectionOpen, setTxSectionOpen] = useState(false);
   const [internalOpen, setInternalOpen] = useState(false);
   const [p2pOpen, setP2pOpen] = useState(false);
   const toast = useToastActions();
@@ -387,21 +388,53 @@ export default function WalletPage() {
         )}
       </div>
 
-      {/* Analysis section */}
-      <div className="border-t border-border mt-4 pt-4">
-        <div className="flex items-center justify-between px-4 mb-2">
-          <p className="font-syne font-semibold text-sm text-text-primary">Analysis</p>
-          <button onClick={() => router.push("/analysis")}
-            className="font-outfit text-xs text-primary">View full</button>
-        </div>
-        <PnlCalendar data={dailyPnl ?? []} />
+      {/* Analysis link */}
+      <div className="mx-4 mt-4">
+        <button
+          onClick={() => router.push("/analysis")}
+          className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl bg-bg-surface border border-border active:scale-95 transition-transform"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M3 17l5-5 4 4 5-6 4 3" stroke="#00B4FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <div className="text-left">
+              <p className="font-syne font-semibold text-sm text-text-primary">PnL Analysis</p>
+              <p className="font-outfit text-[10px] text-text-muted">Daily P&amp;L calendar &amp; portfolio breakdown</p>
+            </div>
+          </div>
+          <IconChevronRight size={16} className="text-text-muted" />
+        </button>
       </div>
 
-      {/* Transaction history */}
-      <div className="border-t border-border mt-4 pt-4">
-        <div className="flex items-center justify-between px-4 mb-2">
-          <p className="font-syne font-semibold text-sm text-text-primary">Recent Transactions</p>
-        </div>
+      {/* Transaction history — collapsible */}
+      <div className="border-t border-border mt-4">
+        <button
+          onClick={() => setTxSectionOpen((v) => !v)}
+          className="flex items-center justify-between w-full px-4 py-3.5 active:bg-bg-surface2 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="6" width="18" height="2.5" rx="1.25" fill="#4A5B7A"/>
+              <rect x="3" y="11" width="12" height="2.5" rx="1.25" fill="#4A5B7A"/>
+              <rect x="3" y="16" width="15" height="2.5" rx="1.25" fill="#4A5B7A"/>
+            </svg>
+            <p className="font-syne font-semibold text-sm text-text-primary">Recent Transactions</p>
+            {historyData && historyData.transactions.length > 0 && (
+              <span className="font-price text-[10px] bg-primary/15 text-primary px-1.5 py-0.5 rounded-full">
+                {historyData.transactions.length}
+              </span>
+            )}
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            className={cn("text-text-muted transition-transform duration-200", txSectionOpen && "rotate-90")}>
+            <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        {txSectionOpen && (
+          <div className="pb-2">
         {!historyData ? (
           <div className="px-4 space-y-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -506,6 +539,8 @@ export default function WalletPage() {
                 </div>
               );
             })}
+          </div>
+        )}
           </div>
         )}
       </div>
