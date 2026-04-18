@@ -708,7 +708,45 @@ Update this section when you complete or start a task. Format:
     Validates + deducts fromToken balance, credits toToken
     Creates ledger entries for both sides (type: 'trade', ref_type: 'dex_swap')
     Clears wallet:info Redis cache after swap
-    Supports asset PIN verification if user has one set```
+    Supports asset PIN verification if user has one set
+[PULSE] 2026-04-18 Wave 5 P-F DONE — MenuSheet Lucide icons.
+  components/home/MenuSheet.tsx:
+    Tile interface: icon prop changed from string (emoji) to React.FC<{size?;className?}>
+    All 20 tiles replaced with exact Lucide icons per brief:
+      Finance: ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight, RefreshCw
+      Trade:   BarChart2, TrendingUp, Users, Shuffle
+      Grow:    Percent, Landmark, Repeat, Bot
+      Account: Gift, UserPlus, PieChart, Key
+      Support: HelpCircle, MessageCircle, Info, Settings
+    Each tile renders a 40x40 rounded bg-bg-surface2 icon container
+    Removed emoji from user card initials (uses first letter of displayName)
+
+[PULSE] 2026-04-18 Wave 5 P-G DONE — Account page profile-first restructure.
+  app/(app)/account/page.tsx:
+    REMOVED: tab system (activeTab, tab bar, 3-column layout)
+    ADDED: single-scroll profile-first layout matching Binance/Bybit pattern:
+
+    Profile card (top, prominent):
+      80px avatar with edit icon overlay
+      Display name, email, phone (masked)
+      KYC badge + level badge (Bronze/Silver/Gold/Platinum/Diamond) side by side
+      UID copy button (inline, truncated)
+      XP progress bar with dynamic level color + "X XP · Y to next level" label
+      Member since date
+
+    Security section (grouped card):
+      Inline security score bar (0/5 → 5/5 with colour: red/amber/green)
+      Rows: Asset PIN, 2FA, Password, Phone, Anti-phishing, Login activity,
+            Withdrawal whitelist, KYC — all tap to open existing sheets
+
+    Notifications section: email/SMS/push live toggles (PATCH /account/notification-preferences)
+    Preferences section: Language selector + Appearance (dark/light/system) — inline, no modal
+    Account section: API Access, Referral, Rewards, Support
+    Legal section: Privacy Policy, Terms of Use
+    Sign Out button at bottom
+
+    Data: fetches /gamify/me for XP/level/xpToNext alongside existing notif-prefs query
+```
 
 ---
 
