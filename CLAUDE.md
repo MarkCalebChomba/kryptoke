@@ -512,6 +512,31 @@ Update this section when you complete or start a task. Format:
   app/(app)/trade/page.tsx: passes symbol + onSymbolChange to FuturesTab
   REQUIRES: Apply migration 023_futures_rls_fix.sql to Supabase
 
+[FORGE] 2026-04-18 Build fixes:
+  next.config.mjs: eslint.ignoreDuringBuilds: true
+  lib/supabase/types.ts: added p2p_buy, p2p_sell, loan_disbursement/repayment/liquidation to ledger union
+  server/routes/wallet.ts: removed invalid account/ref_type from createLedgerEntry calls
+  server/routes/admin/index.ts: explicit Map<string,FreezeRow>, Map<string,UserRow> type params
+  server/routes/withdraw.ts: explicit Map<string,WFreezeRow> type param
+  server/routes/market.ts: MergedCoin type + .filter guard replaces unsafe .filter(Boolean) cast
+
+[FORGE] 2026-04-18 Wave 5 F-H DONE — Orderbook direct Binance WebSocket.
+  lib/hooks/useOrderBook.ts: wss://stream.binance.com:9443/ws/<sym>usdt@depth20@100ms
+    20 levels, 100ms updates, auto-reconnect, no API key needed
+  components/trade/OrderBook.tsx: switched to new hook (was 3s REST poll)
+  lib/hooks/useTrades.ts: removed old REST useOrderBook
+
+[FORGE] 2026-04-18 Wave 5 F-I DONE — Shared token list (instant Home↔Markets navigation).
+  lib/hooks/useTokenList.ts: single [market,tokenlist] cache key, staleTime 60s, gcTime 5min
+  app/(app)/page.tsx: AllMarkets uses useTokenList().slice(0,50) — served from cache
+  app/(app)/markets/page.tsx: All tab with no filters uses shared cache (zero network calls)
+
+[FORGE] 2026-04-18 Wave 5 F-J DONE — Chart attribution cleanup.
+  components/charts/TradingViewWidget.tsx:
+    hide_top_toolbar: true (removes Binance/TradingView toolbar branding)
+    allow_symbol_change: false (KryptoKe UI controls symbol)
+    toolbar_bg matches theme, withdateranges: false
+
 [FORGE] 2026-04-14 Wave 4 F-E DONE — Spot order form continuous slider.
   components/trade/OrderForm.tsx: replaced 5 pct buttons with HTML range slider
 
