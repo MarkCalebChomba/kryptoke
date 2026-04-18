@@ -45,7 +45,7 @@ account.get("/kyc-status", async (c) => {
   const db  = getDb();
 
   const { data: user } = await db.from("users").select("kyc_status").eq("uid", uid).single();
-  const { data: kyc }  = await db.from("kyc_submissions").select("status, reject_reason").eq("uid", uid)
+  const { data: kyc }  = await db.from("kyc_submissions").select("status, rejection_reason").eq("uid", uid)
     .order("created_at", { ascending: false }).limit(1);
 
   const kycRow = kyc?.[0];
@@ -59,7 +59,7 @@ account.get("/kyc-status", async (c) => {
     data: {
       level:        user?.kyc_status === "verified" ? 2 : 0,
       status,
-      rejectReason: kycRow?.reject_reason ?? null,
+      rejectReason: kycRow?.rejection_reason ?? null,
     },
   });
 });

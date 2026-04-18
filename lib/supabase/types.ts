@@ -34,6 +34,9 @@ export interface Database {
           suspended_until: string | null;
           suspension_reason: string | null;
           referral_code: string | null;
+          whitelist_enabled: boolean;
+          country_code: string | null;
+          onboarded_at: string | null;
         };
         Insert: {
           uid?: string;
@@ -59,6 +62,9 @@ export interface Database {
           suspended_until?: string | null;
           suspension_reason?: string | null;
           referral_code?: string | null;
+          whitelist_enabled?: boolean;
+          country_code?: string | null;
+          onboarded_at?: string | null;
         };
         Update: {
           uid?: string;
@@ -127,11 +133,14 @@ export interface Database {
             | "welcome_bonus"
             | "refund"
             | "withdrawal_fee"
-            | "p2p_buy"
+| "p2p_buy"
             | "p2p_sell"
             | "loan_disbursement"
             | "loan_repayment"
             | "loan_liquidation";
+| "bot_trade"
+            | "dca_purchase"
+            | "liquidation";
           reference_id: string | null;
           note: string | null;
           created_at: string;
@@ -156,11 +165,14 @@ export interface Database {
             | "welcome_bonus"
             | "refund"
             | "withdrawal_fee"
-            | "p2p_buy"
+| "p2p_buy"
             | "p2p_sell"
             | "loan_disbursement"
             | "loan_repayment"
             | "loan_liquidation";
+| "bot_trade"
+            | "dca_purchase"
+            | "liquidation";
           reference_id?: string | null;
           note?: string | null;
           created_at?: string;
@@ -725,6 +737,241 @@ export interface Database {
         };
         Update: {
           label?: string;
+        };
+      };
+      deposit_logs: {
+        Row: {
+          id: string;
+          deposit_id: string | null;
+          uid: string;
+          phase: string;
+          detail: Record<string, unknown> | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          deposit_id?: string | null;
+          uid: string;
+          phase: string;
+          detail?: Record<string, unknown> | null;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+      };
+      withdrawal_queue: {
+        Row: {
+          id: string;
+          uid: string;
+          asset_symbol: string;
+          chain_id: string;
+          chain_name: string;
+          gross_amount: string;
+          fee_amount: string;
+          net_amount: string;
+          fee_asset: string;
+          usd_equivalent: string | null;
+          to_address: string;
+          memo: string | null;
+          status: "pending_cancel" | "queued" | "broadcasting" | "completed" | "failed" | "awaiting_admin" | "rejected";
+          cancel_expires_at: string;
+          tx_hash: string | null;
+          block_number: number | null;
+          admin_uid: string | null;
+          admin_notes: string | null;
+          created_at: string;
+          updated_at: string;
+          processed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          asset_symbol: string;
+          chain_id: string;
+          chain_name: string;
+          gross_amount: number | string;
+          fee_amount?: number | string;
+          net_amount: number | string;
+          fee_asset: string;
+          usd_equivalent?: number | string | null;
+          to_address: string;
+          memo?: string | null;
+          status?: "pending_cancel" | "queued" | "broadcasting" | "completed" | "failed" | "awaiting_admin" | "rejected";
+          cancel_expires_at?: string;
+          tx_hash?: string | null;
+          block_number?: number | null;
+          admin_uid?: string | null;
+          admin_notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          processed_at?: string | null;
+        };
+        Update: {
+          status?: "pending_cancel" | "queued" | "broadcasting" | "completed" | "failed" | "awaiting_admin" | "rejected";
+          tx_hash?: string | null;
+          block_number?: number | null;
+          admin_uid?: string | null;
+          admin_notes?: string | null;
+          updated_at?: string;
+          processed_at?: string | null;
+        };
+      };
+      withdrawal_approvals: {
+        Row: {
+          id: string;
+          withdrawal_id: string;
+          admin_uid: string;
+          action: "approved" | "rejected";
+          notes: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          withdrawal_id: string;
+          admin_uid: string;
+          action: "approved" | "rejected";
+          notes?: string | null;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+      };
+      crypto_loans: {
+        Row: {
+          id: string;
+          uid: string;
+          collateral_asset: string;
+          collateral_amount: string;
+          loan_asset: string;
+          loan_amount: string;
+          interest_accrued: string;
+          daily_rate: string;
+          max_ltv: string;
+          liquidation_ltv: string;
+          current_ltv: string;
+          duration_days: number;
+          status: "active" | "repaid" | "liquidated" | "overdue";
+          due_at: string;
+          repaid_at: string | null;
+          liquidated_at: string | null;
+          liquidation_price: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          collateral_asset: string;
+          collateral_amount: number | string;
+          loan_asset?: string;
+          loan_amount: number | string;
+          interest_accrued?: number | string;
+          daily_rate: number | string;
+          max_ltv: number | string;
+          liquidation_ltv: number | string;
+          current_ltv: number | string;
+          duration_days?: number;
+          status?: "active" | "repaid" | "liquidated" | "overdue";
+          due_at: string;
+          repaid_at?: string | null;
+          liquidated_at?: string | null;
+          liquidation_price?: number | string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          loan_amount?: number | string;
+          interest_accrued?: number | string;
+          current_ltv?: number | string;
+          status?: "active" | "repaid" | "liquidated" | "overdue";
+          repaid_at?: string | null;
+          liquidated_at?: string | null;
+          liquidation_price?: number | string | null;
+          updated_at?: string;
+        };
+      };
+      dca_plans: {
+        Row: {
+          id: string;
+          uid: string;
+          asset: string;
+          amount_per_cycle: string;
+          frequency: "hourly" | "daily" | "weekly" | "biweekly" | "monthly";
+          status: "active" | "paused" | "cancelled";
+          total_invested: string;
+          total_units: string;
+          executions: number;
+          last_run_at: string | null;
+          next_run_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          asset: string;
+          amount_per_cycle: number | string;
+          frequency: "hourly" | "daily" | "weekly" | "biweekly" | "monthly";
+          status?: "active" | "paused" | "cancelled";
+          total_invested?: number | string;
+          total_units?: number | string;
+          executions?: number;
+          last_run_at?: string | null;
+          next_run_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          status?: "active" | "paused" | "cancelled";
+          total_invested?: number | string;
+          total_units?: number | string;
+          executions?: number;
+          last_run_at?: string | null;
+          next_run_at?: string;
+          updated_at?: string;
+        };
+      };
+      trading_bots: {
+        Row: {
+          id: string;
+          uid: string;
+          type: "grid" | "dca" | "rebalance";
+          pair: string;
+          config: Record<string, unknown>;
+          state: Record<string, unknown>;
+          status: "running" | "paused" | "stopped" | "error";
+          pnl_usdt: string;
+          executions: number;
+          last_tick: string | null;
+          error_msg: string | null;
+          stopped_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          uid: string;
+          type: "grid" | "dca" | "rebalance";
+          pair: string;
+          config?: Record<string, unknown>;
+          state?: Record<string, unknown>;
+          status?: "running" | "paused" | "stopped" | "error";
+          pnl_usdt?: number | string;
+          executions?: number;
+          last_tick?: string | null;
+          error_msg?: string | null;
+          stopped_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          status?: "running" | "paused" | "stopped" | "error";
+          config?: Record<string, unknown>;
+          state?: Record<string, unknown>;
+          pnl_usdt?: number | string;
+          executions?: number;
+          last_tick?: string | null;
+          error_msg?: string | null;
+          stopped_at?: string | null;
+          updated_at?: string;
         };
       };
       futures_positions: {

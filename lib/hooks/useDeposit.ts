@@ -14,7 +14,7 @@ export function useMpesaDeposit() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [txId, setTxId]                     = useState<string | null>(null);
-  const [depositStatus, setDepositStatus]   = useState<DepositStatus | null>(null);
+  const [depositStatus, setDepositStatus]   = useState<"pending" | "processing" | "completing" | "completed" | "failed" | "cancelled" | null>(null);
   const [mpesaCode, setMpesaCode]           = useState<string | null>(null);
   const [usdtCredited, setUsdtCredited]     = useState<string | null>(null);
 
@@ -61,7 +61,7 @@ export function useMpesaDeposit() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "deposits", filter: `id=eq.${txId}` },
         (payload) => {
-          const row = payload.new as {
+          const row = payload.new as unknown as {
             status: DepositStatus;
             mpesa_code: string | null;
             usdt_credited: string | null;
@@ -82,13 +82,13 @@ export function useMpesaDeposit() {
   // ── Active polling fallback — kicks in if Realtime doesn't fire ─────────
   useEffect(() => {
     if (!txId || !user) return;
-    if (depositStatus === "completed" || depositStatus === "failed") return;
+    if ((depositStatus as string) === "completed" || (depositStatus as string) === "failed") return;
 
     pollIntervalRef.current = setInterval(async () => {
       // If Realtime already handled it, stop
       if (realtimeFiredRef.current) { stopPolling(); return; }
       // If already resolved, stop
-      if (depositStatus === "completed" || depositStatus === "failed") { stopPolling(); return; }
+      if ((depositStatus as string) === "completed" || (depositStatus as string) === "failed") { stopPolling(); return; }
       // Timeout
       if (Date.now() - pollStartRef.current > POLL_MAX_MS) {
         stopPolling();

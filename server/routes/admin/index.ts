@@ -1333,7 +1333,7 @@ admin.post(
 
     const { error } = await db
       .from("users")
-      .update({ suspended_until: suspendedUntil, suspension_reason: reason })
+      .update({ suspended_until: suspendedUntil, suspension_reason: reason } as never)
       .eq("uid", uid);
 
     if (error) return c.json({ success: false, error: error.message, statusCode: 500 }, 500);
@@ -1343,13 +1343,13 @@ admin.post(
     await redis.set(`suspended:${uid}`, { until: suspendedUntil, reason }, { ex: 60 });
 
     // Log it
-    await db.from("ledger_entries").insert({
+    try { await db.from("ledger_entries").insert({
       uid,
       asset: "USDT",
       amount: "0",
       type: "admin_adjustment",
       note: `Account suspended by ${adminUser.email} for ${durationHours}h. Reason: ${reason}`,
-    }).catch(() => undefined);
+    }); } catch { /* non-fatal */ }
 
     return c.json({ success: true, data: { uid, suspendedUntil, reason } });
   }
@@ -1361,7 +1361,7 @@ admin.post("/users/:uid/unsuspend", async (c) => {
   const { uid } = c.req.param();
   const db = getDb();
 
-  await db.from("users").update({ suspended_until: null, suspension_reason: null }).eq("uid", uid);
+  await db.from("users").update({ suspended_until: null, suspension_reason: null } as never).eq("uid", uid);
 
   const { redis } = await import("@/lib/redis/client");
   await redis.del(`suspended:${uid}`);
@@ -1460,8 +1460,8 @@ admin.post(
 
     // If the original entry has a reference_id (deposit/withdrawal), mark it as revoked
     if (entry.reference_id) {
-      await db.from("deposits").update({ status: "failed" }).eq("id", entry.reference_id).catch(() => undefined);
-      await db.from("withdrawals").update({ status: "failed" }).eq("id", entry.reference_id).catch(() => undefined);
+      try { await db.from("deposits").update({ status: "failed" } as never).eq("id", entry.reference_id); } catch { /* non-fatal */ }
+      try { await db.from("withdrawals").update({ status: "failed" } as never).eq("id", entry.reference_id); } catch { /* non-fatal */ }
     }
 
     // Invalidate wallet cache

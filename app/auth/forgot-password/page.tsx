@@ -126,9 +126,7 @@ export default function ForgotPasswordPage() {
           </div>
 
           <OtpInput
-            length={6}
             onComplete={handleVerifyOtp}
-            label="Reset code"
           />
 
           <button

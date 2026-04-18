@@ -42,7 +42,7 @@ export default function AdminSupportPage() {
 
   const update = useMutation({
     mutationFn: ({ id, body }: { id: string; body: Record<string, string> }) =>
-      apiPost(`/support/admin/tickets/${id}`, body, "PATCH"),
+      apiPatch(`/support/admin/tickets/${id}`, body),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin", "tickets"] }); setSelected(null); },
   });
 

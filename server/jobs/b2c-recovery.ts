@@ -133,12 +133,14 @@ export const recoverStuckCompletingDeposits = async (): Promise<void> => {
       console.log(`[Deposit Recovery] Reset deposit ${deposit.id} (KSh ${deposit.amount_kes}) to processing`);
 
       // Log the recovery
-      await db.from("deposit_logs").insert({
-        deposit_id: deposit.id,
-        uid: deposit.uid,
-        phase: "completing_recovery",
-        detail: { note: `Reset from stuck 'completing' state after ${STUCK_MINUTES}min`, cutoff },
-      }).catch(() => { /* non-blocking */ });
+      try {
+        await db.from("deposit_logs").insert({
+          deposit_id: deposit.id,
+          uid: deposit.uid,
+          phase: "completing_recovery",
+          detail: { note: `Reset from stuck 'completing' state after ${STUCK_MINUTES}min`, cutoff },
+        });
+      } catch { /* non-blocking */ }
 
     } catch (err) {
       console.error(`[Deposit Recovery] Failed to recover deposit ${deposit.id}:`, err);
