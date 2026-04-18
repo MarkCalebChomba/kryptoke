@@ -1985,5 +1985,5 @@ This matches how Binance and Bybit structure their profile pages — all info vi
 | FORGE | F-J: Chart attribution cleanup | Remove Binance/TradingView labels user sees |
 | PULSE | P-F: Menu Lucide icons | Proper icons instead of emojis |
 | PULSE | P-G: Account profile restructure | Profile info first, no tab switching |
-| SHIELD | S1: Wallet page (in progress) | Remove analysis section, collapsible transactions |
-| SHIELD | S2: All-transaction notifications (in progress) | Every send/trade/deposit notifies both parties |
+| SHIELD | S1: Wallet page ✅ DONE | Analysis → single nav link, transactions section collapsible |
+| SHIELD | S2: All-transaction notifications ✅ DONE | transferSent/Received/tradeFilled/cryptoWithdrawalQueued/internalTransfer all fire in-app+email+SMS |
