@@ -1745,3 +1745,245 @@ The page exists with a BSC swap UI and hardcoded token list. Make it functional:
 | 10 | PULSE | P-E DEX page | Full feature set |
 
 After all Wave 4 tasks are done, this app is fully fledged.
+
+---
+
+## WAVE 5 — UI/UX Sprint (2026-04-08)
+
+SHIELD has already started S1 and S2 in their own chat. The tasks below go to NEXUS, FORGE, and PULSE.
+
+---
+
+### NEXUS — Wave 5
+
+#### N-E: BroadcastChannel Price Distribution
+
+**Problem:** Every browser tab opens its own WebSocket to Binance. With thousands of users on Vercel serverless, each request is a cold function — no persistent WS is possible server-side. The fix is a two-layer approach:
+
+**Layer 1 — Binance WS on one tab, BroadcastChannel to siblings:**
+
+Create `lib/hooks/usePriceBroadcast.ts`:
+```ts
+// One tab "leads" — opens the Binance WS and writes prices to BroadcastChannel.
+// All other tabs in the same browser "follow" — read from BroadcastChannel only.
+// This halves WS connections per user (most users have 2+ tabs open).
+
+const CHANNEL_NAME = "kk_prices";
+const LEAD_KEY     = "kk_price_lead"; // localStorage key
+
+export function usePriceBroadcast() {
+  // On mount: try to become the leader (set localStorage key with expiry).
+  // If already a leader in another tab, become a follower.
+  // Leader: opens Binance WS, on message → setPrices(zustand) + postMessage to channel.
+  // Follower: listens to channel → setPrices(zustand).
+  // Leader renews its lease every 10s. If lease expires, any follower can take over.
+}
+```
+
+Implementation steps:
+1. Move the Binance WS logic from `app/(app)/markets/page.tsx` (`useVisibleSymbolsWs`) into `usePriceBroadcast`.
+2. The leader subscribes to `wss://stream.binance.com:9443/stream?streams=` with the combined stream for top 50 symbols (`btcusdt@ticker/ethusdt@ticker/...`). Each message → `setPrices({ [sym]: price })` immediately — no batching delay.
+3. Broadcast via `new BroadcastChannel("kk_prices")` so other tabs update instantly without their own WS.
+4. Wire `usePriceBroadcast()` into `app/(app)/layout.tsx` `AuthenticatedShell` so it runs on every page automatically.
+5. The Binance WS ticker stream gives updates in ~100ms — prices will feel live.
+
+**Layer 2 — Remove duplicate price polling:**
+
+Currently `useHomeData` polls `/market/home` every 30s AND the markets page has its own WS. Once `usePriceBroadcast` is in the layout, individual pages should NOT open their own WS. Remove the `useVisibleSymbolsWs` hook from `markets/page.tsx` — it just reads from `usePrices()` (Zustand) instead, which the broadcast hook keeps fresh.
+
+#### N-F: Transaction Notifications (wire-up)
+
+SHIELD is adding `Notifications.transferSent`, `.transferReceived`, `.tradeFilled`, `.cryptoWithdrawalQueued` to `notifications.ts`. Once SHIELD pushes:
+
+Wire the notification calls into:
+- `server/routes/mpesa.ts` — after deposit confirmed callback: `Notifications.depositConfirmed(uid, amount_kes, mpesa_code)`  ← already exists, verify it fires
+- `server/routes/trade.ts` — after trade fills: `Notifications.tradeFilled(uid, side, symbol, amount, price)`
+- `server/routes/withdraw.ts` — after crypto withdrawal queued: `Notifications.cryptoWithdrawalQueued(uid, asset, amount, address)`
+- `server/routes/wallet.ts` — after internal transfer: sender gets `transferSent`, recipient gets `transferReceived`
+
+Each notification = in-app DB insert + SMS if large amount + email for completed events. SHIELD defines the method signatures; NEXUS wires the call sites.
+
+---
+
+### FORGE — Wave 5
+
+#### F-H: Orderbook WebSocket Fix
+
+**Problem:** `useOrderBook` in `lib/hooks/useTrades.ts` polls `GET /market/orderbook/:symbol` every 3 seconds via REST. The server-side route fetches from Binance REST `/api/v3/depth` on each call. This means the orderbook is always 3s stale and makes a server round-trip for every client.
+
+**Fix — direct Binance WS on the client:**
+
+Replace `useOrderBook` entirely:
+
+```ts
+// lib/hooks/useOrderBook.ts  (new file, replaces the function in useTrades.ts)
+export function useOrderBook(symbol: string) {
+  const [bids, setBids] = useState<OrderEntry[]>([]);
+  const [asks, setAsks] = useState<OrderEntry[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!symbol) return;
+    // Binance partial book depth stream — 20 levels, 100ms updates
+    const ws = new WebSocket(
+      `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}usdt@depth20@100ms`
+    );
+    ws.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      // data.bids / data.asks are arrays of [price, quantity]
+      const maxQty = Math.max(...data.bids.map((b: string[]) => parseFloat(b[1])), 0.001);
+      setBids(data.bids.slice(0, 15).map(([p, q]: string[]) => ({
+        price: p, quantity: q, depth: parseFloat(q) / maxQty
+      })));
+      const maxAskQty = Math.max(...data.asks.map((a: string[]) => parseFloat(a[1])), 0.001);
+      setAsks(data.asks.slice(0, 15).map(([p, q]: string[]) => ({
+        price: p, quantity: q, depth: parseFloat(q) / maxAskQty
+      })));
+    };
+    ws.onerror = () => ws.close();
+    wsRef.current = ws;
+    return () => ws.close();
+  }, [symbol]);
+
+  const spread = bids[0] && asks[0]
+    ? (parseFloat(asks[0].price) - parseFloat(bids[0].price)).toFixed(2)
+    : "0";
+
+  return { bids, asks, spread, isLoading: bids.length === 0 && asks.length === 0 };
+}
+```
+
+Update `components/trade/OrderBook.tsx` to import from the new hook file. Remove the old `useOrderBook` from `useTrades.ts`.
+
+Add `wss://stream.binance.com:9443` to `connect-src` in `next.config.mjs` CSP if not present (it already has `wss://stream.binance.com:9443`).
+
+#### F-I: Shared Token List Between Home and Markets
+
+**Problem:** Home page fetches `/market/home` (returns top 50), markets page fetches `/market/prices` with `?limit=200`. They are separate requests with separate caches, so navigating between pages causes a reload.
+
+**Fix:**
+
+1. Create `lib/hooks/useTokenList.ts` — a shared hook backed by a single TanStack Query cache entry:
+```ts
+export function useTokenList() {
+  return useQuery({
+    queryKey: ["market", "tokenlist"],        // one shared cache key
+    queryFn: () => apiGet<CoinPrice[]>("/market/prices?limit=200"),
+    staleTime: 60_000,   // don't re-fetch if navigated within 60s
+    gcTime: 5 * 60_000,  // keep in memory for 5 minutes
+  });
+}
+```
+
+2. In `app/(app)/page.tsx` — replace `useHomeData()` call for the token list section with `useTokenList()`. The home page already has 5 featured tiles (from price WS) — the vertical list below uses `useTokenList().data?.slice(0, 50)`.
+
+3. In `app/(app)/markets/page.tsx` — replace the local `allCoinsCache` fetch with `useTokenList()`. Initialize `allCoinsCache` from the query data. The markets page still adds its own pagination on top.
+
+4. `staleTime: 60_000` means navigating Home → Markets → Home does not trigger a refetch — the data is served from TanStack Query memory cache instantly.
+
+#### F-J: Remove Chat Attribution / Fix Chart Labels
+
+The TradingView chart widget shows its own branding footer. The "chat" the user is seeing is likely the TradingView toolbar or a label reading "Binance" in the chart source. In `components/charts/TradingViewWidget.tsx`:
+- Set `hide_top_toolbar: true` if it's not already
+- Set `hide_legend: false` (keep price legend)  
+- Set `allow_symbol_change: false` (symbol comes from our UI, not TradingView's own selector)
+- Add `locale: "en"` and `toolbar_bg: "var(--color-bg-surface)"` to match theme
+
+Check if `ChartSection.tsx` shows any "from Binance" label and remove it.
+
+---
+
+### PULSE — Wave 5
+
+#### P-F: Menu — Replace Emojis with Lucide Icons
+
+File: `components/home/MenuSheet.tsx`
+
+The `Tile` component uses `icon: string` (emoji). Change it to accept a Lucide icon component:
+
+```tsx
+// Change Tile props from:
+interface TileProps { icon: string; label: string; onClick: () => void; dim?: boolean; }
+
+// To:
+interface TileProps { icon: React.FC<{ size?: number; className?: string }>; label: string; onClick: () => void; dim?: boolean; }
+
+function Tile({ icon: Icon, label, onClick, dim }: TileProps) {
+  return (
+    <button onClick={onClick} className={cn("flex flex-col items-center gap-1.5 p-2 rounded-2xl border border-border bg-bg-surface active:bg-bg-surface2 transition-colors", dim && "opacity-50")}>
+      <div className="w-10 h-10 rounded-xl bg-bg-surface2 border border-border flex items-center justify-center">
+        <Icon size={20} className="text-text-secondary" />
+      </div>
+      <span className="font-outfit text-[10px] text-text-muted">{label}</span>
+    </button>
+  );
+}
+```
+
+Replace every emoji string with the correct Lucide icon. Import from `lucide-react`:
+
+| Tile | Lucide icon |
+|---|---|
+| Deposit | `ArrowDownToLine` |
+| Withdraw | `ArrowUpFromLine` |
+| Transfer | `ArrowLeftRight` |
+| Convert | `RefreshCw` |
+| Spot | `BarChart2` |
+| Futures | `TrendingUp` |
+| P2P | `Users` |
+| DEX | `Shuffle` |
+| Earn | `Percent` |
+| Loans | `Landmark` |
+| Auto-Invest | `Repeat` |
+| Bots | `Bot` |
+| Rewards | `Gift` |
+| Referral | `UserPlus` |
+| Analysis | `PieChart` |
+| API Keys | `Key` |
+| FAQ | `HelpCircle` |
+| Live Chat | `MessageCircle` |
+| About | `Info` |
+| Settings | `Settings` |
+
+#### P-G: Account Page — Swap Profile Card and Settings Position
+
+File: `app/(app)/account/page.tsx`
+
+Currently the page renders: Avatar+name header → Tabs → Profile/Security/Preferences content.
+
+The user wants: Profile details (all user info) shown prominently first, then settings/actions below.
+
+Restructure the page:
+- **Remove the tab system entirely**. It is unnecessary complexity for a profile page.
+- **Top section — Profile card** (full width, prominent):
+  - Large avatar (80px), editable
+  - Display name (tap to edit inline)
+  - Email + phone
+  - UID with copy button
+  - KYC badge + level badge (Bronze/Silver/Gold/etc.) side by side
+  - XP progress bar to next level
+  - Member since date
+- **Below profile — Settings sections** (grouped list items, no tabs):
+  - Security section: PIN, 2FA, Password, Whitelist
+  - Notifications section: Email toggle, SMS toggle
+  - Preferences section: Language, Appearance
+  - Account section: API Keys, Referral, Logout
+  - Legal section: Privacy, Terms
+
+This matches how Binance and Bybit structure their profile pages — all info visible at once, no tab switching needed.
+
+---
+
+## Wave 5 Summary
+
+| Agent | Task | What it fixes |
+|---|---|---|
+| NEXUS | N-E: BroadcastChannel prices | Prices update in ~100ms, one WS per browser (not per tab) |
+| NEXUS | N-F: Transaction notifications | Every transaction fires SMS/email/in-app notification |
+| FORGE | F-H: Orderbook WS | Orderbook shows live 100ms data instead of 3s stale REST |
+| FORGE | F-I: Shared token list | Home→Markets navigation instant, no reload |
+| FORGE | F-J: Chart attribution cleanup | Remove Binance/TradingView labels user sees |
+| PULSE | P-F: Menu Lucide icons | Proper icons instead of emojis |
+| PULSE | P-G: Account profile restructure | Profile info first, no tab switching |
+| SHIELD | S1: Wallet page (in progress) | Remove analysis section, collapsible transactions |
+| SHIELD | S2: All-transaction notifications (in progress) | Every send/trade/deposit notifies both parties |
