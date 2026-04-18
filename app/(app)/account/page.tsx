@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth, useAppStore } from "@/lib/store";
 import { useToastActions } from "@/components/shared/ToastContainer";
@@ -201,38 +201,54 @@ function AssetPinSheet({ isOpen, onClose, hasPin }: {
 
 /* ─── Main page ──────────────────────────────────────────────────────────── */
 
+
+/* ─── Main page ──────────────────────────────────────────────────────────── */
+
 export default function AccountPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const toast = useToastActions();
   const { user, clearAuth } = useAuth();
   const clearStore = useAppStore((s) => s.clearAuth);
   const updateUser = useAppStore((s) => s.updateUser);
   const qc = useQueryClient();
 
-  const defaultTab = (searchParams.get("tab") ?? "profile") as "profile" | "security" | "preferences";
-  const [activeTab, setActiveTab] = useState<"profile" | "security" | "preferences">(defaultTab);
-
-  /* real feature sheets */
-  const [changePwOpen,   setChangePwOpen]   = useState(false);
-  const [pinOpen,        setPinOpen]        = useState(false);
-  const [totpSetupOpen,  setTotpSetupOpen]  = useState(false);
-  const [totpDisableOpen,setTotpDisableOpen]= useState(false);
-  const [phoneOpen,      setPhoneOpen]      = useState(false);
-  const [phishingOpen,   setPhishingOpen]   = useState(false);
-  const [sessionsOpen,   setSessionsOpen]   = useState(false);
-  const [kycOpen,        setKycOpen]        = useState(false);
-  const [whitelistOpen,  setWhitelistOpen]  = useState(false);
-
-  /* roadmap sheets for genuine future features */
+  /* sheets */
+  const [changePwOpen,    setChangePwOpen]    = useState(false);
+  const [pinOpen,         setPinOpen]         = useState(false);
+  const [totpSetupOpen,   setTotpSetupOpen]   = useState(false);
+  const [totpDisableOpen, setTotpDisableOpen] = useState(false);
+  const [phoneOpen,       setPhoneOpen]       = useState(false);
+  const [phishingOpen,    setPhishingOpen]    = useState(false);
+  const [sessionsOpen,    setSessionsOpen]    = useState(false);
+  const [kycOpen,         setKycOpen]         = useState(false);
+  const [whitelistOpen,   setWhitelistOpen]   = useState(false);
   const [roadmap, setRoadmap] = useState<{ open: boolean; title: string; description: string; eta?: string }>({
     open: false, title: "", description: "",
   });
-  function showRoadmap(title: string, description: string, eta?: string) {
-    setRoadmap({ open: true, title, description, eta });
-  }
 
-  /* ── Theme (localStorage, applied to <html>) ──────────────────────────── */
+  /* gamify data */
+  const { data: gamifyData } = useQuery({
+    queryKey: ["gamify", "me"],
+    queryFn: () => apiGet<{
+      level: string; totalXp: number; xpToNext: number | null; badges: Array<{ id: string; label: string; icon: string; earned: boolean }>;
+    }>("/gamify/me"),
+    staleTime: 60_000,
+  });
+
+  /* notification prefs */
+  const { data: notifPrefsData } = useQuery({
+    queryKey: ["account", "notif-prefs"],
+    queryFn: () => apiGet<{ data: Record<string, boolean> }>("/account/notification-preferences"),
+    staleTime: 30_000,
+  });
+  const notifPrefs = notifPrefsData?.data ?? {};
+  const toggleNotifPref = useMutation({
+    mutationFn: (update: Record<string, boolean>) => apiPatch("/account/notification-preferences", update),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["account", "notif-prefs"] }),
+    onError: () => toast.error("Could not save preference"),
+  });
+
+  /* theme */
   const [theme, setTheme] = useState<"dark" | "light" | "system">(() => {
     if (typeof window === "undefined") return "dark";
     return (localStorage.getItem("_kk_theme") as "dark" | "light" | "system") ?? "dark";
@@ -250,7 +266,7 @@ export default function AccountPage() {
     }
   }
 
-  /* ── Language (saved to profile via PATCH /auth/profile) ─────────────── */
+  /* language */
   const [langSaving, setLangSaving] = useState(false);
   async function saveLanguage(lang: "en" | "sw") {
     if (lang === user?.language) return;
@@ -263,26 +279,7 @@ export default function AccountPage() {
     finally { setLangSaving(false); }
   }
 
-  /* ── Notification preferences ─────────────────────────────────────────── */
-  const { data: notifPrefsData } = useQuery({
-    queryKey: ["account", "notif-prefs"],
-    queryFn: () => apiGet<{ data: Record<string, boolean> }>("/account/notification-preferences"),
-    staleTime: 30_000,
-    enabled: activeTab === "preferences",
-  });
-  const notifPrefs = notifPrefsData?.data ?? {};
-
-  const toggleNotifPref = useMutation({
-    mutationFn: (update: Record<string, boolean>) =>
-      apiPatch("/account/notification-preferences", update),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["account", "notif-prefs"] }),
-    onError: () => toast.error("Could not save preference"),
-  });
-
-  function copyUid() {
-    navigator.clipboard.writeText(user?.uid ?? "");
-    toast.copied();
-  }
+  function copyUid() { navigator.clipboard.writeText(user?.uid ?? ""); toast.copied(); }
 
   async function handleSignOut() {
     try { await apiPost("/auth/logout"); } catch { /* non-fatal */ }
@@ -296,382 +293,239 @@ export default function AccountPage() {
 
   if (!user) return null;
 
-  const initials      = getUserInitials(user.displayName, user.email);
+  const initials = getUserInitials(user.displayName, user.email);
   const isKycVerified = user.kycStatus === "verified";
   const isKycPending  = user.kycStatus === "submitted";
+  const level    = gamifyData?.level ?? "Bronze";
+  const totalXp  = gamifyData?.totalXp ?? 0;
+  const xpToNext = gamifyData?.xpToNext ?? null;
+  const xpProgress = xpToNext != null ? Math.min(100, Math.round((totalXp % xpToNext === 0 && totalXp > 0 ? 100 : (totalXp / (totalXp + xpToNext)) * 100))) : 100;
 
-  /* ── Dynamic security score ─────────────────────────────────────────────── */
-  const securityPoints = [
-    user.assetPinSet,
-    user.totpEnabled,
-    !!user.phone,
-    user.antiPhishingSet,
-    isKycVerified,
-  ].filter(Boolean).length;
-  const securityMax = 5;
-  const securityPct = securityPoints / securityMax;
+  const LEVEL_COLORS: Record<string, string> = {
+    Bronze: "#CD7F32", Silver: "#C0C0C0", Gold: "#F0B429",
+    Platinum: "#00E5B4", Diamond: "#60A5FA",
+  };
+  const levelColor = LEVEL_COLORS[level] ?? "#F0B429";
+
+  /* Security score */
+  const securityPoints = [user.assetPinSet, user.totpEnabled, !!user.phone, user.antiPhishingSet, isKycVerified].filter(Boolean).length;
+  const securityPct   = securityPoints / 5;
   const securityColor = securityPct >= 0.8 ? "#00D68F" : securityPct >= 0.5 ? "#F0B429" : "#FF4560";
   const securityLabel = securityPct >= 0.8 ? "Strong" : securityPct >= 0.5 ? "Moderate" : "Weak";
-  const circumference = 2 * Math.PI * 22; // r=22
-  const dashOffset    = circumference * (1 - securityPct);
+
+  /* Row helper */
+  function Row({ label, value, valueClass, onClick, rightEl }: {
+    label: string; value?: string; valueClass?: string;
+    onClick?: () => void; rightEl?: React.ReactNode;
+  }) {
+    return (
+      <button onClick={onClick ?? (() => {})} disabled={!onClick}
+        className={cn("flex items-center justify-between px-4 py-3.5 w-full", onClick && "active:bg-bg-surface2 transition-colors")}>
+        <span className="font-outfit text-sm text-text-primary">{label}</span>
+        <div className="flex items-center gap-2">
+          {rightEl}
+          {value && <span className={cn("font-outfit text-sm text-text-muted", valueClass)}>{value}</span>}
+          {onClick && <IconChevronRight size={15} className="text-text-muted" />}
+        </div>
+      </button>
+    );
+  }
+
+  /* Toggle helper */
+  function Toggle({ value, onToggle }: { value: boolean; onToggle: () => void }) {
+    return (
+      <button onClick={onToggle}
+        className={cn("relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0", value ? "bg-primary" : "bg-border-2")}>
+        <span className={cn("absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-200", value ? "left-5" : "left-0.5")} />
+      </button>
+    );
+  }
+
+  function SectionHeader({ title }: { title: string }) {
+    return <p className="font-syne font-semibold text-xs text-text-muted uppercase tracking-wider px-4 pt-5 pb-1">{title}</p>;
+  }
 
   return (
-    <div className="screen">
-      <TopBar title="Account" showBack onBack={() => router.back()} />
+    <div className="screen overflow-y-auto">
+      <TopBar title="Profile" showBack onBack={() => router.back()} />
 
-      {/* Avatar + name */}
-      <div className="flex items-center gap-4 px-4 py-4 border-b border-border">
-        <button
-          onClick={() => showRoadmap("Edit Profile", "Update your display name and profile picture.", "Q3 2025")}
-          className="relative flex-shrink-0"
-        >
-          <div className="w-16 h-16 rounded-full border-2 border-primary/30 bg-primary/10 flex items-center justify-center overflow-hidden">
-            {user.avatarUrl
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={user.avatarUrl} alt="avatar" className="w-full h-full object-cover" />
-              : <span className="font-syne font-bold text-2xl text-primary">{initials}</span>}
+      {/* ── Profile card ──────────────────────────────────────────────────── */}
+      <div className="mx-4 mt-4 card space-y-4">
+        {/* Avatar row */}
+        <div className="flex items-center gap-4">
+          <div className="relative flex-shrink-0">
+            <div className="w-20 h-20 rounded-full border-2 border-primary/30 bg-primary/10 flex items-center justify-center overflow-hidden">
+              {user.avatarUrl
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={user.avatarUrl} alt="avatar" className="w-full h-full object-cover" />
+                : <span className="font-syne font-bold text-3xl text-primary">{initials}</span>}
+            </div>
+            <div className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-bg-surface border border-border flex items-center justify-center">
+              <IconEdit size={12} className="text-text-secondary" />
+            </div>
           </div>
-          <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-bg-surface border border-border flex items-center justify-center">
-            <IconEdit size={10} className="text-text-secondary" />
-          </div>
-        </button>
-        <div className="flex-1 min-w-0">
-          <p className="font-syne font-bold text-base text-text-primary truncate">
-            {user.displayName ?? user.email.split("@")[0]}
-          </p>
-          <p className="font-outfit text-xs text-text-muted truncate">{user.email}</p>
-          <div className="flex items-center gap-2 mt-1">
-            <span className={cn(
-              "text-[10px] font-outfit font-bold px-2 py-0.5 rounded-full border",
-              isKycVerified ? "text-primary border-primary/30"
-                : isKycPending ? "text-gold border-gold/30"
-                : "text-text-muted border-border"
-            )}>
-              {isKycVerified ? "Verified" : isKycPending ? "Under review" : "Unverified"}
-            </span>
-            <button onClick={copyUid} className="flex items-center gap-1 text-text-muted">
-              <span className="font-price text-[9px]">{user.uid.slice(0, 12)}…</span>
-              <IconCopy size={11} />
-            </button>
+          <div className="flex-1 min-w-0">
+            <p className="font-syne font-bold text-lg text-text-primary truncate">
+              {user.displayName ?? user.email.split("@")[0]}
+            </p>
+            <p className="font-outfit text-xs text-text-muted truncate">{user.email}</p>
+            {user.phone && <p className="font-outfit text-xs text-text-muted">{maskPhone(user.phone)}</p>}
           </div>
         </div>
+
+        {/* Badges row */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={cn(
+            "font-outfit text-[10px] font-bold px-2.5 py-1 rounded-full border",
+            isKycVerified ? "text-primary border-primary/30"
+              : isKycPending ? "text-gold border-gold/30"
+              : "text-text-muted border-border"
+          )}>
+            {isKycVerified ? "✓ Verified" : isKycPending ? "Under Review" : "Unverified"}
+          </span>
+          <span className="font-outfit text-[10px] font-bold px-2.5 py-1 rounded-full border"
+            style={{ color: levelColor, borderColor: levelColor + "50" }}>
+            {level}
+          </span>
+          <button onClick={copyUid} className="flex items-center gap-1 font-price text-[9px] text-text-muted border border-border rounded-full px-2 py-1">
+            {user.uid.slice(0, 12)}… <IconCopy size={9} />
+          </button>
+        </div>
+
+        {/* XP progress */}
+        <div>
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="font-outfit text-[10px] text-text-muted">
+              {totalXp.toLocaleString()} XP
+              {xpToNext != null && <span className="text-text-muted"> · {xpToNext.toLocaleString()} to next level</span>}
+            </span>
+            <span className="font-outfit text-[10px] font-semibold" style={{ color: levelColor }}>{level}</span>
+          </div>
+          <div className="h-1.5 bg-bg-surface2 rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-700"
+              style={{ width: `${xpProgress}%`, background: levelColor }} />
+          </div>
+        </div>
+
+        {/* Member since */}
+        <p className="font-outfit text-[10px] text-text-muted">
+          Member since {new Date(user.createdAt).toLocaleDateString("en-KE", { month: "long", year: "numeric" })}
+        </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-border">
-        {(["profile", "security", "preferences"] as const).map((tab) => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={cn(
-              "flex-1 py-3 font-outfit text-sm font-medium transition-colors border-b-2 capitalize",
-              activeTab === tab
-                ? "text-text-primary border-primary"
-                : "text-text-muted border-transparent"
-            )}>
-            {tab}
-          </button>
+      {/* ── Security ──────────────────────────────────────────────────────── */}
+      <SectionHeader title="Security" />
+      <div className="mx-4 border border-border rounded-2xl overflow-hidden divide-y divide-border/50 bg-bg-surface">
+        {/* Security score bar */}
+        <div className="px-4 py-3 flex items-center gap-3">
+          <div className="flex-1">
+            <div className="flex justify-between mb-1">
+              <span className="font-outfit text-xs text-text-muted">Security level</span>
+              <span className="font-outfit text-xs font-semibold" style={{ color: securityColor }}>{securityLabel}</span>
+            </div>
+            <div className="h-1.5 bg-bg-surface2 rounded-full overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${securityPct * 100}%`, background: securityColor }} />
+            </div>
+          </div>
+          <span className="font-price text-xs font-bold flex-shrink-0" style={{ color: securityColor }}>
+            {securityPoints}/5
+          </span>
+        </div>
+        <Row label="Asset PIN" value={user.assetPinSet ? "Set ✓" : "Not set"} valueClass={user.assetPinSet ? "text-primary" : "text-gold"} onClick={() => setPinOpen(true)} />
+        <Row label="Authenticator (2FA)" value={user.totpEnabled ? "Enabled ✓" : "Not set up"} valueClass={user.totpEnabled ? "text-primary" : "text-gold"} onClick={() => user.totpEnabled ? setTotpDisableOpen(true) : setTotpSetupOpen(true)} />
+        <Row label="Password" onClick={() => setChangePwOpen(true)} />
+        <Row label="Phone number" value={user.phone ? maskPhone(user.phone) : "Not set"} valueClass={user.phone ? undefined : "text-gold"} onClick={() => setPhoneOpen(true)} />
+        <Row label="Anti-phishing code" value={user.antiPhishingSet ? "Set ✓" : "Not set"} valueClass={user.antiPhishingSet ? "text-primary" : "text-gold"} onClick={() => setPhishingOpen(true)} />
+        <Row label="Login activity" onClick={() => setSessionsOpen(true)} />
+        <Row label="Withdrawal whitelist" onClick={() => setWhitelistOpen(true)} />
+        <Row label="Identity (KYC)" value={isKycVerified ? "Verified ✓" : isKycPending ? "Under review" : "Not verified"} valueClass={isKycVerified ? "text-primary" : "text-gold"} onClick={() => setKycOpen(true)} />
+      </div>
+
+      {/* ── Notifications ─────────────────────────────────────────────────── */}
+      <SectionHeader title="Notifications" />
+      <div className="mx-4 border border-border rounded-2xl overflow-hidden divide-y divide-border/50 bg-bg-surface">
+        {[
+          { key: "email", label: "Email notifications" },
+          { key: "sms",   label: "SMS notifications" },
+          { key: "push",  label: "Push notifications" },
+        ].map(({ key, label }) => (
+          <div key={key} className="flex items-center justify-between px-4 py-3.5">
+            <span className="font-outfit text-sm text-text-primary">{label}</span>
+            <Toggle
+              value={notifPrefs[key] !== false}
+              onToggle={() => toggleNotifPref.mutate({ [key]: !(notifPrefs[key] !== false) })}
+            />
+          </div>
         ))}
       </div>
 
-      {/* ── Profile tab ─────────────────────────────────────────────────────── */}
-      {activeTab === "profile" && (
-        <div>
-          <div className="px-4 pt-4 pb-2">
-            <p className="font-syne font-semibold text-sm text-text-primary">Account Information</p>
+      {/* ── Preferences ───────────────────────────────────────────────────── */}
+      <SectionHeader title="Preferences" />
+      <div className="mx-4 border border-border rounded-2xl overflow-hidden divide-y divide-border/50 bg-bg-surface">
+        {/* Language */}
+        <div className="px-4 py-3.5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-outfit text-sm text-text-primary">Language</span>
+            {langSaving && <span className="font-outfit text-[10px] text-text-muted">Saving…</span>}
           </div>
-          <div className="divide-y divide-border/50">
-            <button
-              onClick={copyUid}
-              className="flex items-center justify-between px-4 py-3 w-full active:bg-bg-surface2"
-            >
-              <span className="font-outfit text-sm text-text-primary">UID</span>
-              <div className="flex items-center gap-2">
-                <span className="font-price text-xs text-text-muted">{user.uid.slice(0, 16)}...</span>
-                <IconCopy size={13} className="text-text-muted" />
-              </div>
-            </button>
-
-            <SettingRow
-              icon={IconShield}
-              label="Identity verification"
-              value={isKycVerified ? "Verified" : isKycPending ? "Under review" : "Not verified"}
-              valueClass={isKycVerified ? "text-primary" : isKycPending ? "text-gold" : "text-gold"}
-              onClick={() => setKycOpen(true)}
-            />
-
-            <div className="flex items-center gap-3 px-4 py-3.5">
-              <div className="w-8 h-8 rounded-xl bg-bg-surface2 border border-border flex items-center justify-center flex-shrink-0">
-                <IconGlobe size={15} className="text-text-secondary" />
-              </div>
-              <span className="flex-1 font-outfit text-sm text-text-primary">Country / Region</span>
-              <span className="font-outfit text-sm text-text-muted">Kenya</span>
-            </div>
-
-            <SettingRow
-              icon={IconChart} label="Trading fee tier" value="Regular user"
-              onClick={() => showRoadmap("Fee Tiers", "Volume-based fee tiers unlock at $10,000 monthly trading volume.", "Q4 2025")}
-            />
-          </div>
-
-          <div className="px-4 pt-4 pb-2 border-t border-border mt-2">
-            <p className="font-syne font-semibold text-sm text-text-primary">Shortcuts</p>
-          </div>
-          <div className="grid grid-cols-4 gap-2 px-4 pb-4">
-            {[
-              {
-                icon: IconHelp, label: "Get Help",
-                action: () => router.push("/support"),
-              },
-              {
-                icon: IconChart, label: "Demo Trade",
-                action: () => showRoadmap("Demo Trading", "Practice trading with virtual funds before going live. No real money at risk.", "Q4 2025"),
-              },
-              {
-                icon: IconGift, label: "Referral",
-                action: () => {
-                  navigator.clipboard.writeText(`https://kryptoke.com/ref/${user.uid.slice(0, 8)}`);
-                  toast.success("Referral link copied");
-                },
-              },
-              {
-                icon: IconFlag, label: "Campaigns",
-                action: () => showRoadmap("Campaigns", "Earn bonus rewards through trading competitions and promotional campaigns.", "Q4 2025"),
-              },
-            ].map(({ icon: Icon, label, action }) => (
-              <button key={label} onClick={action}
-                className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-bg-surface2 border border-border active:scale-95 transition-transform">
-                <Icon size={18} className="text-text-secondary" />
-                <span className="font-outfit text-[10px] text-text-muted text-center leading-tight">{label}</span>
+          <div className="flex gap-2">
+            {(["en", "sw"] as const).map((lang) => (
+              <button key={lang} onClick={() => saveLanguage(lang)}
+                className={cn("flex-1 py-1.5 rounded-xl border font-outfit text-xs font-semibold transition-all",
+                  user.language === lang ? "bg-primary/15 border-primary/40 text-primary" : "border-border text-text-muted")}>
+                {lang === "en" ? "English" : "Swahili"}
               </button>
             ))}
           </div>
-
-          <div className="border-t border-border mt-2 divide-y divide-border/50">
-            <SettingRow icon={IconChart} label="Analysis" onClick={() => router.push("/analysis")} />
-            <SettingRow
-              icon={IconUsers} label="Community"
-              onClick={() => showRoadmap("Community", "Join KryptoKe discussions, get trading signals, and connect with other Kenyan traders.", "Q3 2025")}
-            />
-            <SettingRow
-              icon={IconDownload} label="Account statement"
-              onClick={() => showRoadmap("Account Statement", "Download a full PDF statement of your transaction history for tax reporting.", "Q3 2025")}
-            />
-            <SettingRow
-              icon={IconApi} label="API Access"
-              onClick={() => router.push("/account/api")}
-            />
-            <SettingRow icon={IconHelp} label="FAQ" onClick={() => router.push("/faq")} />
-            <SettingRow icon={IconHelp} label="About KryptoKe" onClick={() => router.push("/about")} />
+          {user.language === "sw" && (
+            <p className="font-outfit text-[10px] text-text-muted mt-1.5">Kiswahili interface coming in Q4 2025 ✓</p>
+          )}
+        </div>
+        {/* Appearance */}
+        <div className="px-4 py-3.5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-outfit text-sm text-text-primary">Appearance</span>
+            <span className="font-outfit text-sm text-text-muted capitalize">{theme}</span>
           </div>
-
-          <div className="px-4 pt-4 pb-8 border-t border-border mt-2">
-            <button
-              onClick={handleSignOut}
-              className="w-full py-3.5 rounded-2xl border border-down/30 bg-down/5 font-outfit font-semibold text-sm text-down active:opacity-80 transition-opacity"
-            >
-              Sign Out
-            </button>
+          <div className="flex gap-2">
+            {(["dark", "light", "system"] as const).map((t) => (
+              <button key={t} onClick={() => applyTheme(t)}
+                className={cn("flex-1 py-1.5 rounded-xl border font-outfit text-xs font-semibold capitalize transition-all",
+                  theme === t ? "bg-primary/15 border-primary/40 text-primary" : "border-border text-text-muted")}>
+                {t}
+              </button>
+            ))}
           </div>
         </div>
-      )}
+      </div>
 
-      {/* ── Security tab ────────────────────────────────────────────────────── */}
-      {activeTab === "security" && (
-        <div>
-          {/* Dynamic security score gauge */}
-          <div className="mx-4 mt-4 card border-border bg-bg-surface2">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-outfit text-sm text-text-muted">Security level</p>
-                <p className="font-syne font-bold text-base mt-0.5" style={{ color: securityColor }}>
-                  {securityLabel}
-                </p>
-                <p className="font-outfit text-xs text-text-muted mt-1 leading-relaxed">
-                  {securityPoints}/{securityMax} protection methods active
-                </p>
-              </div>
-              <div className="relative w-14 h-14 flex-shrink-0">
-                <svg width="56" height="56" viewBox="0 0 56 56" className="-rotate-90">
-                  <circle cx="28" cy="28" r="22" fill="none" stroke="#1C2840" strokeWidth="5" />
-                  <circle cx="28" cy="28" r="22" fill="none" stroke={securityColor} strokeWidth="5"
-                    strokeDasharray={circumference} strokeDashoffset={dashOffset} strokeLinecap="round" />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="font-price text-xs font-bold" style={{ color: securityColor }}>
-                    {securityPoints}/{securityMax}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* ── Account ───────────────────────────────────────────────────────── */}
+      <SectionHeader title="Account" />
+      <div className="mx-4 border border-border rounded-2xl overflow-hidden divide-y divide-border/50 bg-bg-surface">
+        <Row label="API Access" onClick={() => router.push("/account/api")} />
+        <Row label="Referral program" onClick={() => router.push("/referral")} />
+        <Row label="Rewards" onClick={() => router.push("/rewards")} />
+        <Row label="Support" onClick={() => router.push("/support")} />
+      </div>
 
-          <div className="px-4 pt-4 pb-2">
-            <p className="font-syne font-semibold text-sm text-text-primary">Authentication</p>
-          </div>
-          <div className="divide-y divide-border/50">
-            <SettingRow
-              label="Authenticator app (2FA)"
-              value={user.totpEnabled ? "Enabled" : "Not set up"}
-              valueClass={user.totpEnabled ? "text-primary" : "text-gold"}
-              enabled={user.totpEnabled}
-              onClick={() => user.totpEnabled ? setTotpDisableOpen(true) : setTotpSetupOpen(true)}
-            />
-            <SettingRow
-              label="Phone number"
-              value={user.phone ? maskPhone(user.phone) : "Not set"}
-              valueClass={user.phone ? undefined : "text-gold"}
-              onClick={() => setPhoneOpen(true)}
-            />
-            <div className="flex items-center gap-3 px-4 py-3.5">
-              <span className="flex-1 font-outfit text-sm text-text-primary">Email</span>
-              <span className="font-outfit text-sm text-text-muted truncate max-w-[200px]">{user.email}</span>
-            </div>
-            <SettingRow icon={IconLock} label="Login password" onClick={() => setChangePwOpen(true)} />
-          </div>
+      {/* ── Legal ─────────────────────────────────────────────────────────── */}
+      <SectionHeader title="Legal" />
+      <div className="mx-4 border border-border rounded-2xl overflow-hidden divide-y divide-border/50 bg-bg-surface">
+        <Row label="Privacy Policy" onClick={() => router.push("/privacy")} />
+        <Row label="Terms of Use"   onClick={() => router.push("/terms")} />
+      </div>
 
-          <div className="px-4 pt-4 pb-2 border-t border-border mt-2">
-            <p className="font-syne font-semibold text-sm text-text-primary">Advanced</p>
-          </div>
-          <div className="divide-y divide-border/50">
-            <SettingRow
-              icon={IconLock}
-              label="Asset PIN"
-              value={user.assetPinSet ? "Set" : "Not set"}
-              valueClass={user.assetPinSet ? "text-primary" : "text-gold"}
-              enabled={user.assetPinSet}
-              onClick={() => setPinOpen(true)}
-            />
-            <SettingRow
-              label="Anti-phishing code"
-              value={user.antiPhishingSet ? "Set" : "Not set"}
-              valueClass={user.antiPhishingSet ? "text-primary" : "text-gold"}
-              enabled={user.antiPhishingSet}
-              onClick={() => setPhishingOpen(true)}
-            />
-            <SettingRow
-              label="Login activity"
-              onClick={() => setSessionsOpen(true)}
-            />
-            <SettingRow
-              label="Withdrawal whitelist"
-              onClick={() => setWhitelistOpen(true)}
-            />
-          </div>
-        </div>
-      )}
+      {/* ── Sign out ──────────────────────────────────────────────────────── */}
+      <div className="mx-4 mt-5 mb-10">
+        <button onClick={handleSignOut}
+          className="w-full py-3.5 rounded-2xl border border-down/30 bg-down/5 font-outfit font-semibold text-sm text-down active:opacity-80 transition-opacity">
+          Sign Out
+        </button>
+      </div>
 
-      {/* ── Preferences tab ─────────────────────────────────────────────────── */}
-      {activeTab === "preferences" && (
-        <div className="divide-y divide-border/50">
-
-          {/* Language */}
-          <div className="px-4 py-3.5">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-xl bg-bg-surface2 border border-border flex items-center justify-center flex-shrink-0">
-                <IconGlobe size={15} className="text-text-secondary" />
-              </div>
-              <span className="flex-1 font-outfit text-sm text-text-primary">Language</span>
-              {langSaving && <span className="font-outfit text-[10px] text-text-muted">Saving…</span>}
-            </div>
-            <div className="flex gap-2 ml-11">
-              {(["en", "sw"] as const).map((lang) => (
-                <button key={lang} onClick={() => saveLanguage(lang)}
-                  className={cn(
-                    "flex-1 py-2 rounded-xl border font-outfit text-xs font-semibold transition-all",
-                    user?.language === lang
-                      ? "bg-primary/15 border-primary/40 text-primary"
-                      : "border-border text-text-muted"
-                  )}>
-                  {lang === "en" ? "English" : "Swahili"}
-                </button>
-              ))}
-            </div>
-            {user?.language === "sw" && (
-              <p className="font-outfit text-[10px] text-text-muted mt-2 ml-11">
-                Kiswahili interface coming in Q4 2025 — preference saved ✓
-              </p>
-            )}
-          </div>
-
-          {/* Appearance / Theme */}
-          <div className="px-4 py-3.5">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-8 h-8 rounded-xl bg-bg-surface2 border border-border flex items-center justify-center flex-shrink-0">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="5" stroke="currentColor" strokeWidth="1.75"/>
-                  <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
-                    stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
-                </svg>
-              </div>
-              <span className="flex-1 font-outfit text-sm text-text-primary">Appearance</span>
-              <span className="font-outfit text-sm text-text-muted capitalize">{theme}</span>
-            </div>
-            <div className="flex gap-2 ml-11">
-              {(["dark", "light", "system"] as const).map((t) => (
-                <button key={t} onClick={() => applyTheme(t)}
-                  className={cn(
-                    "flex-1 py-2 rounded-xl border font-outfit text-xs font-semibold capitalize transition-all",
-                    theme === t
-                      ? "bg-primary/15 border-primary/40 text-primary"
-                      : "border-border text-text-muted"
-                  )}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Notification preferences */}
-          <div className="px-4 py-3.5">
-            <p className="font-outfit text-sm text-text-primary mb-3">Notifications</p>
-            <div className="space-y-3">
-              {[
-                { key: "email",    label: "Email notifications",    desc: "Deposits, withdrawals, security alerts" },
-                { key: "sms",      label: "SMS notifications",       desc: "Deposit confirmed, withdrawal sent" },
-                { key: "push",     label: "Push notifications",      desc: "Price alerts, order fills" },
-              ].map(({ key, label, desc }) => {
-                const enabled = notifPrefs[key] !== false;
-                return (
-                  <div key={key} className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-outfit text-sm text-text-primary">{label}</p>
-                      <p className="font-outfit text-[10px] text-text-muted">{desc}</p>
-                    </div>
-                    <button
-                      onClick={() => toggleNotifPref.mutate({ [key]: !enabled })}
-                      disabled={toggleNotifPref.isPending}
-                      className={cn(
-                        "relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0",
-                        enabled ? "bg-primary" : "bg-border-2"
-                      )}
-                      aria-label={`Toggle ${label}`}
-                    >
-                      <span className={cn(
-                        "absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all duration-200",
-                        enabled ? "left-5" : "left-0.5"
-                      )} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* API Access — link to dedicated page */}
-          <SettingRow
-            icon={IconApi}
-            label="API Access"
-            value="Manage keys"
-            onClick={() => router.push("/account/api")}
-          />
-
-          <SettingRow label="Privacy Policy" onClick={() => router.push("/privacy")} />
-          <SettingRow label="Terms of Use"   onClick={() => router.push("/terms")}   />
-        </div>
-      )}
-
-      {/* ── All sheets ──────────────────────────────────────────────────────── */}
+      {/* ── All sheets ────────────────────────────────────────────────────── */}
       <ChangePasswordSheet    isOpen={changePwOpen}    onClose={() => setChangePwOpen(false)} />
-      <AssetPinSheet          isOpen={pinOpen}         onClose={() => setPinOpen(false)}        hasPin={user.assetPinSet} />
+      <AssetPinSheet          isOpen={pinOpen}         onClose={() => setPinOpen(false)} hasPin={user.assetPinSet} />
       <TotpSetupSheet         isOpen={totpSetupOpen}   onClose={() => setTotpSetupOpen(false)} />
       <TotpDisableSheet       isOpen={totpDisableOpen} onClose={() => setTotpDisableOpen(false)} />
       <PhoneUpdateSheet       isOpen={phoneOpen}       onClose={() => setPhoneOpen(false)} />
@@ -679,13 +533,10 @@ export default function AccountPage() {
       <LoginActivitySheet     isOpen={sessionsOpen}    onClose={() => setSessionsOpen(false)} />
       <KycSheet               isOpen={kycOpen}         onClose={() => setKycOpen(false)} />
       <WhitelistSheet         isOpen={whitelistOpen}   onClose={() => setWhitelistOpen(false)} />
-
       <RoadmapSheet
         isOpen={roadmap.open}
         onClose={() => setRoadmap(r => ({ ...r, open: false }))}
-        title={roadmap.title}
-        description={roadmap.description}
-        eta={roadmap.eta}
+        title={roadmap.title} description={roadmap.description} eta={roadmap.eta}
       />
     </div>
   );
