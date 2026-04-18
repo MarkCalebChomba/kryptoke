@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 55; // Reduced from 300 — prevents Vercel Fluid CPU exhaustion
 
 /**
  * POST /api/v1/cron/bots
  * Trading bots + DCA execution + loan liquidation + loan interest accrual.
- * Register on cron-job.org: every 5 minutes, POST with Authorization: Bearer <CRON_SECRET>
+ * Register on cron-job.org: every 15 minutes (was 5min — reduces Fluid CPU by 3x), POST with Authorization: Bearer <CRON_SECRET>
  */
 export async function POST(req: Request): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET;

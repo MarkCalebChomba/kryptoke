@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 300; // 5 min max — scoring can take time for many users
+export const maxDuration = 90; // 90s max — bulk query rewrite made this fast
 
 /**
  * POST /api/v1/cron/aml-score

@@ -2,7 +2,7 @@
  * Deposit Monitor Cron Endpoint
  * POST /api/v1/cron/deposit-monitor
  *
- * Called by cron-job.org every 30 seconds.
+ * Called by cron-job.org every 2 minutes (was 30s — reduces Vercel Fluid CPU usage by 4x).
  * Scans all supported non-EVM chains for new incoming deposits.
  * Also processes the withdrawal queue (advance queued → broadcast).
  *
@@ -12,11 +12,14 @@
  *   URL:      https://yourdomain.com/api/v1/cron/deposit-monitor
  *   Method:   POST
  *   Headers:  X-Cron-Secret: <your-secret>
- *   Schedule: Every 30 seconds (two jobs: :00 and :30 of each minute)
+ *   Schedule: Every 2 minutes — on cron-job.org set interval to 2 minutes
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import type { NonEvmChainId } from "@/server/services/nonEvm";
+
+export const runtime = "nodejs";
+export const maxDuration = 45; // Blockchain RPC calls are slow; 45s is ample. Was unset (defaulted to 10s and timed out).
 
 const NON_EVM_CHAINS: NonEvmChainId[] = [
   "TRON", "BTC", "LTC", "DOGE", "BCH", "SOL", "XRP", "TON", "XLM", "NEAR", "FIL",

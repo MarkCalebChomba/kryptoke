@@ -3,14 +3,14 @@
  *
  * Price refresh cron — POST /api/v1/cron/prices
  * Secured by X-Cron-Secret header.
- * Schedule on cron-job.org: every 30 seconds.
+ * Schedule on cron-job.org: every 60 seconds (was 30s — halves Vercel Fluid CPU usage).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { refreshPrices } from "@/server/jobs/prices";
 
 export const runtime = "nodejs";
-export const maxDuration = 25; // Vercel function timeout
+export const maxDuration = 15; // Prices write is Redis-only now, fast
 
 export async function POST(req: NextRequest) {
   const secret =
