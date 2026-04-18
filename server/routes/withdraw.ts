@@ -467,7 +467,8 @@ withdraw.get("/chains/:asset", withApiRateLimit(), async (c) => {
     db.from("token_chain_freeze").select("chain_id, deposit_frozen, withdraw_frozen").eq("token_symbol", asset),
     db.from("non_evm_chains").select("*").eq("withdraw_enabled", true).order("sort_order"),
   ]);
-  const freezeMap = new Map((freezes ?? []).map((f) => [f.chain_id, f]));
+  type WFreezeRow = { chain_id: string; deposit_frozen: boolean; withdraw_frozen: boolean };
+  const freezeMap = new Map<string, WFreezeRow>((freezes ?? []).map((f) => [f.chain_id, f as WFreezeRow]));
   const { CHAINS } = await import("@/server/services/blockchain");
 
   const evmChains = Object.values(CHAINS).map((ch) => {

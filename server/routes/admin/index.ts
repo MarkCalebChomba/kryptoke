@@ -1102,7 +1102,7 @@ admin.get("/token-freeze/:symbol", async (c) => {
     db.from("token_chain_freeze").select("chain_id, deposit_frozen, withdraw_frozen").eq("token_symbol", symbol),
   ]);
   type FreezeRow = { chain_id: string; deposit_frozen: boolean; withdraw_frozen: boolean };
-  const freezeMap = new Map((freezes ?? []).map((f) => [(f as FreezeRow).chain_id, f as FreezeRow]));
+  const freezeMap = new Map<string, FreezeRow>((freezes ?? []).map((f) => [(f as FreezeRow).chain_id, f as FreezeRow]));
   const result = (fees ?? []).map((c) => ({
     chain_id: c.chain_id,
     chain_name: c.chain_name,
@@ -1513,7 +1513,8 @@ admin.get("/compliance", async (c) => {
     ? await db.from("users").select("uid, email, display_name").in("uid", uids)
     : { data: [] };
 
-  const userMap = new Map((users ?? []).map((u) => [(u as { uid: string; email: string; display_name: string | null }).uid, u as { uid: string; email: string; display_name: string | null }]));
+  type UserRow = { uid: string; email: string; display_name: string | null };
+  const userMap = new Map<string, UserRow>((users ?? []).map((u) => [(u as UserRow).uid, u as UserRow]));
 
   const items = (scores ?? [])
     .map((s: unknown) => {

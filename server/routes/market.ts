@@ -1103,7 +1103,8 @@ market.get("/coins", authMiddleware, async (c) => {
   }
 
   // ── Primary path: merge DB tokens with Redis prices
-  let merged = (tokens ?? [])
+  type MergedCoin = { symbol: string; name: string; logo_url: string; cmc_rank: number; chain_ids: unknown; is_depositable: boolean; price: string; change_24h: string; change_1h: string; volume_24h: string; high_24h: string; low_24h: string; source: string };
+  let merged: MergedCoin[] = (tokens ?? [])
     .map((t) => {
       const p = prices[t.symbol];
       if (!p) return null;
@@ -1123,7 +1124,7 @@ market.get("/coins", authMiddleware, async (c) => {
         source:         p.source,
       };
     })
-    .filter(Boolean) as NonNullable<ReturnType<typeof Array.prototype.map>>[];
+    .filter((x): x is MergedCoin => x !== null);
 
   // ── If merged is still empty (tokens exist but no prices matched by symbol yet)
   // Try a case-insensitive match, then fall back to showing tokens with price:0
